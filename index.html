@@ -47,11 +47,37 @@
   .bar-fill { height:100%; border-radius:6px; }
   .toast { position:fixed; bottom:22px; right:22px; background:#0f2b1a; color:#fff; padding:12px 18px; border-radius:10px; font-size:14px; z-index:99; box-shadow:0 8px 24px rgba(0,0,0,.25); }
   .scroll-x { overflow-x:auto; }
+  /* ---- Relatórios ---- */
+  .rel-folha { background:#fff; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); padding:34px 38px; max-width:1000px; margin:0 auto 18px; }
+  .rel-cab { border-bottom:3px solid #14532d; padding-bottom:14px; margin-bottom:18px; }
+  .rel-titulo { font-size:19px; font-weight:800; color:#14532d; letter-spacing:.4px; text-transform:uppercase; }
+  .rel-sub { font-size:12.5px; color:#64748b; margin-top:3px; }
+  .rel-info { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px 22px; margin-bottom:20px; }
+  .rel-info div span { display:block; font-size:10.5px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:.4px; }
+  .rel-info div b { font-size:13.5px; color:#1e293b; font-weight:600; }
+  .rel-num { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:22px; }
+  .rel-num > div { border:1px solid #e2e8f0; border-radius:9px; padding:11px 14px; }
+  .rel-num .v { font-size:22px; font-weight:800; line-height:1.1; }
+  .rel-num .r { font-size:10.5px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.3px; }
+  .rel-bloco { page-break-inside:avoid; break-inside:avoid; margin-bottom:20px; }
+  .rel-bloco h4 { font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:.4px; padding:7px 12px; border-radius:7px 7px 0 0; color:#fff; }
+  .rel-lista { border:1px solid #e2e8f0; border-top:none; border-radius:0 0 7px 7px; }
+  .rel-lista ol { margin:0; padding:8px 10px 10px 34px; columns:2; column-gap:26px; }
+  .rel-lista li { font-size:13px; color:#1e293b; padding:2.5px 0; break-inside:avoid; }
+  .rel-lista .vazio { padding:12px; font-size:12.5px; color:#94a3b8; font-style:italic; }
+  .rel-ass { display:grid; grid-template-columns:1fr 1fr; gap:44px; margin-top:44px; page-break-inside:avoid; }
+  .rel-ass div { border-top:1px solid #334155; padding-top:6px; font-size:11.5px; color:#475569; text-align:center; }
+  .rel-rodape { margin-top:26px; padding-top:10px; border-top:1px solid #e2e8f0; font-size:10.5px; color:#94a3b8; display:flex; justify-content:space-between; }
+  .rel-tab th { background:#f1f5f9; }
   @media print {
-    .sidebar, .no-print { display:none !important; }
+    @page { size:A4; margin:12mm; }
+    .sidebar, .no-print, header { display:none !important; }
     body { background:#fff; }
     .card { box-shadow:none; border:1px solid #e2e8f0; }
     .view:not(.active) { display:none; }
+    .p-7 { padding:0 !important; }
+    .rel-folha { box-shadow:none; border:none; padding:0; max-width:none; margin:0 0 10px; }
+    .rel-folha + .rel-folha { page-break-before:always; }
   }
 </style>
 </head>
@@ -67,6 +93,7 @@
       <div class="nav-item active" data-view="dashboard"><i class="fa-solid fa-chart-pie"></i> Dashboard</div>
       <div class="nav-item" data-view="reunioes"><i class="fa-solid fa-clipboard-check"></i> Reuniões / Chamada</div>
       <div class="nav-item" data-view="escala"><i class="fa-solid fa-calendar-days"></i> Escala Semanal</div>
+      <div class="nav-item" data-view="relatorios"><i class="fa-solid fa-file-lines"></i> Relatórios</div>
       <div class="nav-item" data-view="admin"><i class="fa-solid fa-users-gear"></i> Admin</div>
     </nav>
     <div class="px-5 mt-4 text-[11px] text-green-200/50 leading-relaxed">
@@ -191,6 +218,38 @@
         </div>
       </section>
 
+      <!-- ================= RELATÓRIOS ================= -->
+      <section id="view-relatorios" class="view">
+        <div class="card mb-5 no-print">
+          <div class="flex flex-wrap items-end gap-3">
+            <div><label class="form-label">Modelo de relatório</label>
+              <select id="relTipo" class="form-input" style="width:260px">
+                <option value="ata">Ata de uma reunião (lista de presença)</option>
+                <option value="consolidado">Consolidado do período</option>
+                <option value="faltas">Relação de faltas e justificados</option>
+                <option value="individual">Ficha individual do integrante</option>
+              </select></div>
+            <div id="relWrapReuniao"><label class="form-label">Reunião</label>
+              <select id="relReuniao" class="form-input" style="width:280px"></select></div>
+            <div id="relWrapPessoa" style="display:none"><label class="form-label">Integrante</label>
+              <select id="relPessoa" class="form-input" style="width:230px"></select></div>
+            <div id="relWrapPeriodo" style="display:none" class="flex gap-3 items-end">
+              <div><label class="form-label">De</label><input type="date" id="relDe" class="form-input" style="width:160px"></div>
+              <div><label class="form-label">Até</label><input type="date" id="relAte" class="form-input" style="width:160px"></div>
+              <button class="btn btn-secondary btn-sm mb-[2px]" onclick="relPeriodoRapido('mes')">Mês atual</button>
+              <button class="btn btn-secondary btn-sm mb-[2px]" onclick="relPeriodoRapido('ano')">Ano</button>
+              <button class="btn btn-secondary btn-sm mb-[2px]" onclick="relPeriodoRapido('tudo')">Tudo</button>
+            </div>
+            <div class="ml-auto flex gap-2">
+              <button class="btn btn-secondary" onclick="exportarRelatorioCSV()"><i class="fa-solid fa-file-csv"></i> CSV</button>
+              <button class="btn btn-primary" onclick="window.print()"><i class="fa-solid fa-print"></i> Imprimir / PDF</button>
+            </div>
+          </div>
+          <p class="text-[12px] text-slate-500 mt-3">Em <b>Imprimir</b>, escolher "Salvar como PDF" no destino gera o arquivo para enviar por e-mail ou anexar no sistema.</p>
+        </div>
+        <div id="relSaida"></div>
+      </section>
+
       <!-- ================= ADMIN ================= -->
       <section id="view-admin" class="view">
         <div class="grid lg:grid-cols-2 gap-5 mb-5">
@@ -299,6 +358,7 @@ const TITULOS = {
   dashboard:['Dashboard','Indicadores de participação da equipe'],
   reunioes:['Reuniões / Chamada','Registro de presença das reuniões de segurança'],
   escala:['Escala Semanal','Quem apresenta a segurança em cada semana'],
+  relatorios:['Relatórios','Documentos prontos para imprimir ou salvar em PDF'],
   admin:['Admin','Cadastro e importação de participantes']
 };
 document.querySelectorAll('.nav-item').forEach(el=>{
@@ -919,6 +979,261 @@ function exportarDashboardCSV(){
   baixar(`participacao-seguranca-${hojeISO()}.csv`, '﻿'+csv, 'text/csv;charset=utf-8');
 }
 
+/* =============== RELATÓRIOS =============== */
+const REL_COR = { P:'#16a34a', A:'#dc2626', J:'#d97706' };
+const REL_ROT = { P:'Presentes', A:'Ausentes', J:'Justificados' };
+
+function relPeriodo(){
+  const de = document.getElementById('relDe').value, ate = document.getElementById('relAte').value;
+  return { de, ate, lista: db.reunioes.filter(r=>(!de||r.data>=de)&&(!ate||r.data<=ate)).sort((a,b)=>(a.data||'').localeCompare(b.data||'')) };
+}
+function relPeriodoRapido(t){
+  const hoje = new Date(), a = hoje.getFullYear(), m = String(hoje.getMonth()+1).padStart(2,'0');
+  const de = document.getElementById('relDe'), ate = document.getElementById('relAte');
+  if (t==='mes'){ de.value = `${a}-${m}-01`; ate.value = new Date(a, hoje.getMonth()+1, 0).toISOString().slice(0,10); }
+  else if (t==='ano'){ de.value = `${a}-01-01`; ate.value = `${a}-12-31`; }
+  else { de.value=''; ate.value=''; }
+  renderRelatorio();
+}
+function textoPeriodo(de, ate){
+  if (!de && !ate) return 'Todo o histórico';
+  if (de && ate) return `${fmtData(de)} a ${fmtData(ate)}`;
+  return de ? `A partir de ${fmtData(de)}` : `Até ${fmtData(ate)}`;
+}
+function nomesPorStatus(r, st){
+  return Object.entries(r.presencas||{}).filter(([,v])=>v===st)
+    .map(([pid])=>nomePart(pid)).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+}
+function blocoNomes(titulo, cor, nomes){
+  return `<div class="rel-bloco"><h4 style="background:${cor}">${titulo} (${nomes.length})</h4>
+    <div class="rel-lista">${nomes.length?`<ol>${nomes.map(n=>`<li>${esc(n)}</li>`).join('')}</ol>`:'<div class="vazio">Ninguém nesta condição.</div>'}</div></div>`;
+}
+function cabecalhoRel(titulo, sub){
+  return `<div class="rel-cab"><div class="flex items-start justify-between gap-4">
+      <div><div class="rel-titulo">${titulo}</div><div class="rel-sub">${sub}</div></div>
+      <div class="text-right text-[10.5px] text-slate-400 leading-tight">Emitido em<br><b class="text-slate-600 text-[12px]">${new Date().toLocaleDateString('pt-BR')}</b></div>
+    </div></div>`;
+}
+function rodapeRel(extra){
+  return `<div class="rel-rodape"><span>Controle de Reuniões de Segurança</span><span>${extra||''}</span></div>`;
+}
+function numeros(p,a,j,perc){
+  return `<div class="rel-num">
+    <div><div class="r">Convocados</div><div class="v" style="color:#1e293b">${p+a+j}</div></div>
+    <div><div class="r">Presentes</div><div class="v" style="color:#16a34a">${p}</div></div>
+    <div><div class="r">Ausentes</div><div class="v" style="color:#dc2626">${a}</div></div>
+    <div><div class="r">Justificados</div><div class="v" style="color:#d97706">${j}</div></div>
+  </div>
+  <div class="flex items-center gap-3 mb-6">
+    <div class="bar-track" style="height:12px"><div class="bar-fill" style="width:${perc.toFixed(0)}%;background:${corPerc(perc)}"></div></div>
+    <div class="font-extrabold text-[17px] whitespace-nowrap" style="color:${corPerc(perc)}">${perc.toFixed(1)}% de participação</div>
+  </div>`;
+}
+
+function relAta(){
+  const id = document.getElementById('relReuniao').value;
+  const r = db.reunioes.find(x=>x.id===id);
+  if (!r) return `<div class="rel-folha text-center text-slate-400 py-10">Nenhuma reunião registrada. Faça a chamada na aba "Reuniões".</div>`;
+  const c = contaReuniao(r);
+  return `<div class="rel-folha">
+    ${cabecalhoRel('Relatório de Reunião de Segurança', `Lista de presença — ${fmtData(r.data)} (${diaSemana(r.data)})`)}
+    <div class="rel-info">
+      <div><span>Data</span><b>${fmtData(r.data)}</b></div>
+      <div><span>Tema</span><b>${esc(r.tema)||'—'}</b></div>
+      <div><span>Apresentador</span><b>${r.apresentador?esc(nomePart(r.apresentador)):'—'}</b></div>
+      <div><span>Local</span><b>${esc(r.local)||'—'}</b></div>
+      ${r.obs?`<div style="grid-column:1/-1"><span>Observações</span><b>${esc(r.obs)}</b></div>`:''}
+    </div>
+    ${numeros(c.p,c.a,c.j,c.perc)}
+    ${blocoNomes('Presentes', REL_COR.P, nomesPorStatus(r,'P'))}
+    ${blocoNomes('Ausentes', REL_COR.A, nomesPorStatus(r,'A'))}
+    ${blocoNomes('Ausências justificadas', REL_COR.J, nomesPorStatus(r,'J'))}
+    <div class="rel-ass"><div>Responsável pela reunião</div><div>Segurança do Trabalho</div></div>
+    ${rodapeRel(fmtData(r.data))}</div>`;
+}
+
+function relConsolidado(){
+  const { de, ate, lista } = relPeriodo();
+  if (!lista.length) return `<div class="rel-folha text-center text-slate-400 py-10">Nenhuma reunião no período selecionado.</div>`;
+  let tp=0, ta=0, tj=0;
+  lista.forEach(r=>{ const c=contaReuniao(r); tp+=c.p; ta+=c.a; tj+=c.j; });
+  const tot = tp+ta+tj, perc = tot ? ((db.config.contarJustificado?tp+tj:tp)/tot*100) : 0;
+
+  const linhas = lista.map(r=>{ const c=contaReuniao(r);
+    return `<tr><td>${fmtData(r.data)}</td><td>${esc(r.tema)||'—'}</td><td>${r.apresentador?esc(nomePart(r.apresentador)):'—'}</td>
+      <td class="text-center font-semibold text-green-700">${c.p}</td><td class="text-center font-semibold text-red-700">${c.a}</td>
+      <td class="text-center font-semibold text-amber-600">${c.j}</td>
+      <td class="text-center font-bold" style="color:${corPerc(c.perc)}">${c.perc.toFixed(0)}%</td></tr>`; }).join('');
+
+  const stats = statsIndividuais(lista).sort((a,b)=>(b.perc??-1)-(a.perc??-1) || a.p.nome.localeCompare(b.p.nome,'pt-BR'));
+  const linhasP = stats.map((s,i)=>`<tr><td class="text-slate-400">${i+1}</td><td class="font-semibold">${esc(s.p.nome)}</td>
+      <td>${esc(s.p.setor)||'—'}</td><td class="text-center">${s.conv}</td>
+      <td class="text-center font-semibold text-green-700">${s.pres}</td><td class="text-center font-semibold text-red-700">${s.aus}</td>
+      <td class="text-center font-semibold text-amber-600">${s.just}</td>
+      <td class="text-center font-bold" style="color:${s.perc==null?'#94a3b8':corPerc(s.perc)}">${s.perc==null?'—':s.perc.toFixed(0)+'%'}</td></tr>`).join('');
+
+  const detalhe = lista.map(r=>{ const c=contaReuniao(r);
+    return `<div class="rel-bloco" style="border:1px solid #e2e8f0;border-radius:9px;padding:13px 15px">
+      <div class="flex justify-between items-baseline mb-2 flex-wrap gap-2">
+        <b class="text-[14px] text-slate-800">${fmtData(r.data)} — ${esc(r.tema)||'Sem tema'}</b>
+        <span class="text-[12px]" style="color:${corPerc(c.perc)}"><b>${c.perc.toFixed(0)}%</b> · ${c.p}P / ${c.a}A / ${c.j}J</span></div>
+      ${['P','A','J'].map(st=>{ const n = nomesPorStatus(r,st); if(!n.length) return '';
+        return `<div class="text-[12.5px] mb-1"><b style="color:${REL_COR[st]}">${REL_ROT[st]}:</b> <span class="text-slate-600">${n.map(esc).join(' · ')}</span></div>`; }).join('')}
+    </div>`; }).join('');
+
+  return `<div class="rel-folha">
+    ${cabecalhoRel('Relatório Consolidado de Participação', `Período: ${textoPeriodo(de,ate)} — ${lista.length} reunião(ões)`)}
+    ${numeros(tp,ta,tj,perc)}
+    <h3 class="font-bold text-slate-800 text-[14px] mb-2">Reuniões do período</h3>
+    <table class="rel-tab mb-7"><thead><tr><th>Data</th><th>Tema</th><th>Apresentador</th><th class="text-center">Pres.</th><th class="text-center">Aus.</th><th class="text-center">Just.</th><th class="text-center">%</th></tr></thead><tbody>${linhas}</tbody></table>
+    <h3 class="font-bold text-slate-800 text-[14px] mb-2">Participação por integrante</h3>
+    <table class="rel-tab mb-7"><thead><tr><th>#</th><th>Integrante</th><th>Setor</th><th class="text-center">Conv.</th><th class="text-center">Pres.</th><th class="text-center">Faltas</th><th class="text-center">Just.</th><th class="text-center">%</th></tr></thead><tbody>${linhasP}</tbody></table>
+    <h3 class="font-bold text-slate-800 text-[14px] mb-2">Detalhamento por reunião</h3>
+    ${detalhe}
+    ${rodapeRel(textoPeriodo(de,ate))}</div>`;
+}
+
+function relFaltas(){
+  const { de, ate, lista } = relPeriodo();
+  if (!lista.length) return `<div class="rel-folha text-center text-slate-400 py-10">Nenhuma reunião no período selecionado.</div>`;
+  const dados = db.participantes.map(p=>{
+    const faltas = lista.filter(r=>(r.presencas||{})[p.id]==='A').map(r=>r.data);
+    const justs  = lista.filter(r=>(r.presencas||{})[p.id]==='J').map(r=>r.data);
+    const conv   = lista.filter(r=>(r.presencas||{})[p.id]).length;
+    return { p, faltas, justs, conv };
+  }).filter(d=>d.faltas.length || d.justs.length)
+    .sort((a,b)=> b.faltas.length-a.faltas.length || a.p.nome.localeCompare(b.p.nome,'pt-BR'));
+
+  const corpo = dados.length ? dados.map(d=>`<tr>
+      <td class="font-semibold">${esc(d.p.nome)}</td><td>${esc(d.p.setor)||'—'}</td>
+      <td class="text-center font-bold ${d.faltas.length?'text-red-700':'text-slate-300'}">${d.faltas.length}</td>
+      <td class="text-[12.5px] text-slate-600">${d.faltas.map(fmtData).join(' · ')||'—'}</td>
+      <td class="text-center font-bold ${d.justs.length?'text-amber-600':'text-slate-300'}">${d.justs.length}</td>
+      <td class="text-[12.5px] text-slate-600">${d.justs.map(fmtData).join(' · ')||'—'}</td>
+      <td class="text-center">${d.conv?((d.conv-d.faltas.length-d.justs.length)/d.conv*100).toFixed(0)+'%':'—'}</td>
+    </tr>`).join('')
+    : `<tr><td colspan="7" class="text-center text-slate-400 py-6">Nenhuma falta ou justificativa no período — 100% de presença.</td></tr>`;
+
+  const totalFaltas = dados.reduce((s,d)=>s+d.faltas.length,0);
+  const totalJusts  = dados.reduce((s,d)=>s+d.justs.length,0);
+
+  return `<div class="rel-folha">
+    ${cabecalhoRel('Relação de Faltas e Ausências Justificadas', `Período: ${textoPeriodo(de,ate)} — ${lista.length} reunião(ões)`)}
+    <div class="rel-num" style="grid-template-columns:repeat(3,1fr)">
+      <div><div class="r">Pessoas com ocorrência</div><div class="v" style="color:#1e293b">${dados.length}</div></div>
+      <div><div class="r">Total de faltas</div><div class="v" style="color:#dc2626">${totalFaltas}</div></div>
+      <div><div class="r">Total justificadas</div><div class="v" style="color:#d97706">${totalJusts}</div></div>
+    </div>
+    <table class="rel-tab"><thead><tr><th>Integrante</th><th>Setor</th><th class="text-center">Faltas</th><th>Datas das faltas</th><th class="text-center">Just.</th><th>Datas justificadas</th><th class="text-center">Presença</th></tr></thead><tbody>${corpo}</tbody></table>
+    <div class="rel-ass"><div>Ciente do colaborador</div><div>Segurança do Trabalho</div></div>
+    ${rodapeRel(textoPeriodo(de,ate))}</div>`;
+}
+
+function relIndividual(){
+  const { de, ate, lista } = relPeriodo();
+  const pid = document.getElementById('relPessoa').value;
+  const p = db.participantes.find(x=>x.id===pid);
+  if (!p) return `<div class="rel-folha text-center text-slate-400 py-10">Cadastre participantes no Admin para gerar a ficha.</div>`;
+  const conv = lista.filter(r=>(r.presencas||{})[p.id]);
+  const pres = conv.filter(r=>r.presencas[p.id]==='P').length;
+  const aus  = conv.filter(r=>r.presencas[p.id]==='A').length;
+  const just = conv.filter(r=>r.presencas[p.id]==='J').length;
+  const perc = conv.length ? ((db.config.contarJustificado?pres+just:pres)/conv.length*100) : 0;
+  const badge = { P:'<span class="badge b-green">Presente</span>', A:'<span class="badge b-red">Ausente</span>', J:'<span class="badge b-amber">Justificado</span>' };
+  const linhas = conv.length ? conv.map(r=>`<tr><td>${fmtData(r.data)}</td><td>${diaSemana(r.data)}</td><td>${esc(r.tema)||'—'}</td>
+      <td>${r.apresentador===p.id?'<span class="badge b-blue">Apresentou</span>':''}</td>
+      <td class="text-right">${badge[r.presencas[p.id]]||''}</td></tr>`).join('')
+    : `<tr><td colspan="5" class="text-center text-slate-400 py-6">Sem reuniões registradas para este integrante no período.</td></tr>`;
+
+  return `<div class="rel-folha">
+    ${cabecalhoRel('Ficha Individual de Participação', `${esc(p.nome)} — Período: ${textoPeriodo(de,ate)}`)}
+    <div class="rel-info">
+      <div><span>Nome</span><b>${esc(p.nome)}</b></div>
+      <div><span>Matrícula</span><b>${esc(p.matricula)||'—'}</b></div>
+      <div><span>Setor</span><b>${esc(p.setor)||'—'}</b></div>
+      <div><span>Turno</span><b>${esc(p.turno)||'—'}</b></div>
+      <div><span>Função</span><b>${esc(p.funcao)||'—'}</b></div>
+      <div><span>Apresentações feitas</span><b>${lista.filter(r=>r.apresentador===p.id).length}</b></div>
+    </div>
+    ${numeros(pres,aus,just,perc)}
+    <h3 class="font-bold text-slate-800 text-[14px] mb-2">Histórico de reuniões</h3>
+    <table class="rel-tab"><thead><tr><th>Data</th><th>Dia</th><th>Tema</th><th></th><th class="text-right">Situação</th></tr></thead><tbody>${linhas}</tbody></table>
+    <div class="rel-ass"><div>Assinatura do colaborador</div><div>Segurança do Trabalho</div></div>
+    ${rodapeRel(esc(p.nome))}</div>`;
+}
+
+function renderRelatorio(){
+  const tipo = document.getElementById('relTipo').value;
+  document.getElementById('relWrapReuniao').style.display = tipo==='ata' ? '' : 'none';
+  document.getElementById('relWrapPessoa').style.display  = tipo==='individual' ? '' : 'none';
+  document.getElementById('relWrapPeriodo').style.display = tipo==='ata' ? 'none' : 'flex';
+
+  const selR = document.getElementById('relReuniao'), antR = selR.value;
+  const reunioes = [...db.reunioes].sort((a,b)=>(b.data||'').localeCompare(a.data||''));
+  selR.innerHTML = reunioes.length
+    ? reunioes.map(r=>`<option value="${r.id}">${fmtData(r.data)} — ${esc(r.tema)||'sem tema'}</option>`).join('')
+    : '<option value="">— nenhuma reunião —</option>';
+  if (reunioes.some(r=>r.id===antR)) selR.value = antR;
+
+  const selP = document.getElementById('relPessoa'), antP = selP.value;
+  selP.innerHTML = db.participantes.length
+    ? [...db.participantes].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')).map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join('')
+    : '<option value="">— nenhum participante —</option>';
+  if (db.participantes.some(p=>p.id===antP)) selP.value = antP;
+
+  document.getElementById('relSaida').innerHTML =
+      tipo==='ata' ? relAta()
+    : tipo==='consolidado' ? relConsolidado()
+    : tipo==='faltas' ? relFaltas()
+    : relIndividual();
+}
+function exportarRelatorioCSV(){
+  const tipo = document.getElementById('relTipo').value;
+  const asp = v => `"${String(v==null?'':v).replace(/"/g,'""')}"`;
+  let csv = '', nome = '';
+  if (tipo==='ata') {
+    const r = db.reunioes.find(x=>x.id===document.getElementById('relReuniao').value);
+    if (!r) { toast('Nenhuma reunião para exportar.','erro'); return; }
+    nome = `ata-${r.data}`;
+    csv = `Reuniao de seguranca;${fmtData(r.data)}\nTema;${r.tema||''}\nApresentador;${r.apresentador?nomePart(r.apresentador):''}\nLocal;${r.local||''}\n\nSituacao;Nome;Setor\n`;
+    ['P','A','J'].forEach(st=>{
+      Object.entries(r.presencas||{}).filter(([,v])=>v===st).forEach(([pid])=>{
+        const p = db.participantes.find(x=>x.id===pid) || {};
+        csv += [REL_ROT[st].replace(/s$/,''), nomePart(pid), p.setor||''].map(asp).join(';')+'\n';
+      });
+    });
+  } else if (tipo==='individual') {
+    const { lista } = relPeriodo();
+    const p = db.participantes.find(x=>x.id===document.getElementById('relPessoa').value);
+    if (!p) { toast('Selecione um integrante.','erro'); return; }
+    nome = `ficha-${norm(p.nome).replace(/\s+/g,'-')}`;
+    csv = `Ficha individual;${p.nome}\nSetor;${p.setor||''}\n\nData;Dia;Tema;Situacao\n`;
+    lista.filter(r=>(r.presencas||{})[p.id]).forEach(r=>{
+      csv += [fmtData(r.data), diaSemana(r.data), r.tema||'', REL_ROT[r.presencas[p.id]].replace(/s$/,'')].map(asp).join(';')+'\n';
+    });
+  } else if (tipo==='faltas') {
+    const { lista } = relPeriodo();
+    nome = 'faltas-justificadas';
+    csv = 'Integrante;Setor;Faltas;Datas das faltas;Justificadas;Datas justificadas\n';
+    db.participantes.forEach(p=>{
+      const f = lista.filter(r=>(r.presencas||{})[p.id]==='A').map(r=>fmtData(r.data));
+      const j = lista.filter(r=>(r.presencas||{})[p.id]==='J').map(r=>fmtData(r.data));
+      if (!f.length && !j.length) return;
+      csv += [p.nome,p.setor||'',f.length,f.join(' | '),j.length,j.join(' | ')].map(asp).join(';')+'\n';
+    });
+  } else {
+    const { lista } = relPeriodo();
+    nome = 'consolidado';
+    csv = 'Data;Tema;Apresentador;Presentes;Ausentes;Justificados;Participacao %\n';
+    lista.forEach(r=>{ const c=contaReuniao(r);
+      csv += [fmtData(r.data), r.tema||'', r.apresentador?nomePart(r.apresentador):'', c.p, c.a, c.j, c.perc.toFixed(1)].map(asp).join(';')+'\n'; });
+    csv += '\nIntegrante;Setor;Convocado;Presente;Faltas;Justificadas;Participacao %\n';
+    statsIndividuais(lista).forEach(s=>{
+      csv += [s.p.nome, s.p.setor||'', s.conv, s.pres, s.aus, s.just, s.perc==null?'':s.perc.toFixed(1)].map(asp).join(';')+'\n'; });
+  }
+  baixar(`${nome}-${hojeISO()}.csv`, '﻿'+csv, 'text/csv;charset=utf-8');
+}
+
 /* =============== FILTROS / INIT =============== */
 function iniciarFiltros(){
   const anos = [...new Set(db.reunioes.map(r=>(r.data||'').slice(0,4)).filter(Boolean))].sort().reverse();
@@ -941,8 +1256,11 @@ function renderAll(){
   iniciarFiltros();
   document.getElementById('hdrCount').textContent = `${ativos().length} ativos · ${db.reunioes.length} reuniões`;
   document.getElementById('hdrDate').textContent = new Date().toLocaleDateString('pt-BR');
-  renderDashboard(); renderReunioes(); renderEscala(); renderParticipantes();
+  renderDashboard(); renderReunioes(); renderEscala(); renderParticipantes(); renderRelatorio();
 }
+['relTipo','relReuniao','relPessoa','relDe','relAte'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', renderRelatorio);
+});
 document.getElementById('dashPeriodo').onchange = e=>{
   document.getElementById('wrapAno').style.display = e.target.value==='ano' ? '' : 'none';
   document.getElementById('wrapMes').style.display = e.target.value==='mes' ? '' : 'none';
