@@ -9,8 +9,11 @@
 <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 <style>
   body { font-family:'Segoe UI', system-ui, sans-serif; background:#f1f5f9; margin:0; }
-  .sidebar { width:250px; min-height:100vh; background:linear-gradient(180deg,#14532d 0%,#052e16 100%); flex-shrink:0; }
-  .nav-item { display:flex; align-items:center; gap:10px; padding:10px 18px; color:#a7d3b4; cursor:pointer; border-radius:8px; margin:2px 8px; transition:all .2s; font-size:14px; }
+  .sidebar { width:250px; min-height:100vh; background:linear-gradient(160deg,#0C56B0 0%,#0A4695 45%,#003A7D 100%); flex-shrink:0; position:relative; overflow:hidden; }
+  .sidebar::after { content:''; position:absolute; right:-30px; bottom:-30px; width:210px; height:210px; opacity:.16;
+    background-image:radial-gradient(#fff 1.4px, transparent 1.5px); background-size:11px 11px; pointer-events:none; }
+  .sidebar > * { position:relative; z-index:1; }
+  .nav-item { display:flex; align-items:center; gap:10px; padding:10px 18px; color:#a8c9ec; cursor:pointer; border-radius:8px; margin:2px 8px; transition:all .2s; font-size:14px; }
   .nav-item:hover, .nav-item.active { background:rgba(255,255,255,.13); color:#fff; }
   .nav-item i { width:20px; text-align:center; }
   .view { display:none; }
@@ -19,16 +22,16 @@
   .stat-card { background:#fff; border-radius:12px; padding:18px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
   .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 15px; border-radius:8px; font-size:14px; font-weight:500; cursor:pointer; border:none; transition:all .15s; }
   .btn:disabled { opacity:.5; cursor:not-allowed; }
-  .btn-primary { background:#15803d; color:#fff; } .btn-primary:hover { background:#166534; }
-  .btn-dark { background:#0f2b1a; color:#fff; } .btn-dark:hover { background:#052e16; }
+  .btn-primary { background:#0057B8; color:#fff; } .btn-primary:hover { background:#00427F; }
+  .btn-dark { background:#003A7D; color:#fff; } .btn-dark:hover { background:#002B5C; }
   .btn-success { background:#16a34a; color:#fff; } .btn-success:hover { background:#15803d; }
   .btn-danger { background:#dc2626; color:#fff; } .btn-danger:hover { background:#b91c1c; }
   .btn-warn { background:#d97706; color:#fff; } .btn-warn:hover { background:#b45309; }
   .btn-secondary { background:#e2e8f0; color:#475569; } .btn-secondary:hover { background:#cbd5e1; }
-  .btn-outline { background:#fff; border:1.5px solid #15803d; color:#15803d; } .btn-outline:hover { background:#15803d; color:#fff; }
+  .btn-outline { background:#fff; border:1.5px solid #0057B8; color:#0057B8; } .btn-outline:hover { background:#0057B8; color:#fff; }
   .btn-sm { padding:5px 10px; font-size:12.5px; }
   .form-input { width:100%; border:1.5px solid #e2e8f0; border-radius:8px; padding:8px 12px; font-size:14px; outline:none; background:#fff; }
-  .form-input:focus { border-color:#15803d; }
+  .form-input:focus { border-color:#0057B8; }
   .form-label { display:block; font-size:12.5px; font-weight:600; color:#475569; margin-bottom:4px; }
   table { width:100%; border-collapse:collapse; }
   th { background:#f8fafc; color:#64748b; font-size:11.5px; font-weight:700; text-transform:uppercase; padding:9px 12px; text-align:left; border-bottom:1px solid #e2e8f0; white-space:nowrap; }
@@ -45,12 +48,12 @@
   .pill.on-p { background:#16a34a; color:#fff; } .pill.on-a { background:#dc2626; color:#fff; } .pill.on-j { background:#d97706; color:#fff; }
   .bar-track { background:#f1f5f9; border-radius:6px; height:9px; overflow:hidden; width:100%; }
   .bar-fill { height:100%; border-radius:6px; }
-  .toast { position:fixed; bottom:22px; right:22px; background:#0f2b1a; color:#fff; padding:12px 18px; border-radius:10px; font-size:14px; z-index:99; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+  .toast { position:fixed; bottom:22px; right:22px; background:#003A7D; color:#fff; padding:12px 18px; border-radius:10px; font-size:14px; z-index:99; box-shadow:0 8px 24px rgba(0,0,0,.25); }
   .scroll-x { overflow-x:auto; }
   /* ---- Relatórios ---- */
   .rel-folha { background:#fff; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); padding:34px 38px; max-width:1000px; margin:0 auto 18px; }
-  .rel-cab { border-bottom:3px solid #14532d; padding-bottom:14px; margin-bottom:18px; }
-  .rel-titulo { font-size:19px; font-weight:800; color:#14532d; letter-spacing:.4px; text-transform:uppercase; }
+  .rel-cab { border-bottom:3px solid #0A4695; padding-bottom:14px; margin-bottom:18px; }
+  .rel-titulo { font-size:19px; font-weight:800; color:#003A7D; letter-spacing:.4px; text-transform:uppercase; }
   .rel-sub { font-size:12.5px; color:#64748b; margin-top:3px; }
   .rel-info { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px 22px; margin-bottom:20px; }
   .rel-info div span { display:block; font-size:10.5px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:.4px; }
@@ -85,9 +88,14 @@
 <div class="flex">
   <!-- SIDEBAR -->
   <aside class="sidebar">
-    <div class="px-5 py-6 border-b border-white/10">
-      <div class="text-white font-bold text-lg leading-tight"><i class="fa-solid fa-helmet-safety mr-2"></i>Segurança</div>
-      <div class="text-[12px] text-green-200/70 mt-1">Controle de Reuniões</div>
+    <div class="px-5 py-7 border-b border-white/10 flex items-center gap-3">
+      <div class="w-12 h-12 rounded-xl bg-white/95 flex items-center justify-center shrink-0 shadow-sm">
+        <i class="fa-solid fa-helmet-safety text-[26px]" style="color:#0A4695"></i>
+      </div>
+      <div class="min-w-0">
+        <div class="text-white font-extrabold text-[19px] leading-none tracking-wide">SEGURANÇA</div>
+        <div class="text-[11.5px] text-blue-100/75 mt-1.5 leading-tight">Controle de Reuniões</div>
+      </div>
     </div>
     <nav class="py-3">
       <div class="nav-item active" data-view="dashboard"><i class="fa-solid fa-chart-pie"></i> Dashboard</div>
@@ -96,7 +104,7 @@
       <div class="nav-item" data-view="relatorios"><i class="fa-solid fa-file-lines"></i> Relatórios</div>
       <div class="nav-item" data-view="admin"><i class="fa-solid fa-users-gear"></i> Admin</div>
     </nav>
-    <div class="px-5 mt-4 text-[11px] text-green-200/50 leading-relaxed">
+    <div class="px-5 mt-4 text-[11px] text-blue-100/55 leading-relaxed">
       Dados salvos neste navegador.<br>Use <b>Backup</b> no Admin para levar a outro PC.
     </div>
   </aside>
@@ -129,7 +137,7 @@
             <div id="wrapAno"><label class="form-label">Ano</label><select id="dashAno" class="form-input" style="width:120px"></select></div>
             <div id="wrapMes" style="display:none"><label class="form-label">Mês</label><select id="dashMes" class="form-input" style="width:150px"></select></div>
             <label class="flex items-center gap-2 text-[13px] text-slate-600 pb-2 ml-2">
-              <input type="checkbox" id="chkJust" class="w-4 h-4 accent-green-700"> Contar <b>justificado</b> como presente
+              <input type="checkbox" id="chkJust" class="w-4 h-4 accent-[#0057B8]"> Contar <b>justificado</b> como presente
             </label>
             <div class="ml-auto flex gap-2">
               <button class="btn btn-secondary btn-sm" onclick="exportarDashboardCSV()"><i class="fa-solid fa-file-csv"></i> Exportar CSV</button>
@@ -188,7 +196,7 @@
       <!-- ================= ESCALA ================= -->
       <section id="view-escala" class="view">
         <div class="card mb-5 no-print">
-          <h2 class="font-bold text-slate-800 mb-3"><i class="fa-solid fa-rotate text-green-700 mr-1"></i> Gerar escala em rodízio</h2>
+          <h2 class="font-bold text-slate-800 mb-3"><i class="fa-solid fa-rotate mr-1" style="color:#0057B8"></i> Gerar escala em rodízio</h2>
           <div class="grid md:grid-cols-5 gap-3 items-end">
             <div><label class="form-label">Data da 1ª apresentação</label><input type="date" id="escIni" class="form-input"></div>
             <div><label class="form-label">Nº de semanas</label><input type="number" id="escQtd" class="form-input" value="8" min="1" max="60"></div>
@@ -254,7 +262,7 @@
       <section id="view-admin" class="view">
         <div class="grid lg:grid-cols-2 gap-5 mb-5">
           <div class="card">
-            <h2 class="font-bold text-slate-800 mb-1"><i class="fa-solid fa-file-import text-green-700 mr-1"></i> Importar lista de participantes</h2>
+            <h2 class="font-bold text-slate-800 mb-1"><i class="fa-solid fa-file-import mr-1" style="color:#0057B8"></i> Importar lista de participantes</h2>
             <p class="text-[12px] text-slate-500 mb-4">Arquivo <b>.csv / .xlsx / .xls</b> ou cole direto da planilha (Ctrl+C no Excel, Ctrl+V aqui).</p>
             <div class="grid grid-cols-2 gap-3 mb-3">
               <div><label class="form-label">Arquivo</label>
@@ -275,7 +283,7 @@
           </div>
 
           <div class="card">
-            <h2 class="font-bold text-slate-800 mb-1"><i class="fa-solid fa-user-plus text-green-700 mr-1"></i> Cadastro manual</h2>
+            <h2 class="font-bold text-slate-800 mb-1"><i class="fa-solid fa-user-plus mr-1" style="color:#0057B8"></i> Cadastro manual</h2>
             <p class="text-[12px] text-slate-500 mb-4">Adicione ou edite um participante.</p>
             <input type="hidden" id="pEdit">
             <div class="grid grid-cols-2 gap-3">
@@ -290,7 +298,7 @@
               <button class="btn btn-secondary" onclick="limparFormParticipante()">Cancelar</button>
             </div>
             <hr class="my-5 border-slate-200">
-            <h3 class="font-bold text-slate-800 mb-2 text-[15px]"><i class="fa-solid fa-database text-green-700 mr-1"></i> Backup / Restauração</h3>
+            <h3 class="font-bold text-slate-800 mb-2 text-[15px]"><i class="fa-solid fa-database mr-1" style="color:#0057B8"></i> Backup / Restauração</h3>
             <div class="flex flex-wrap gap-2">
               <button class="btn btn-outline btn-sm" onclick="exportarBackup()"><i class="fa-solid fa-download"></i> Exportar backup (.json)</button>
               <label class="btn btn-outline btn-sm mb-0"><i class="fa-solid fa-upload"></i> Importar backup
@@ -847,7 +855,7 @@ function renderDashboard(){
       </div></div>`;
   document.getElementById('dashCards').innerHTML =
       card('fa-percent', corPerc(percGeral), percGeral.toFixed(1)+'%', 'Participação da equipe', `${efet} de ${totReg} registros`)
-    + card('fa-clipboard-check','#15803d', lista.length, 'Reuniões no período', lista.length?`${fmtData(lista[0].data)} a ${fmtData(lista[lista.length-1].data)}`:'—')
+    + card('fa-clipboard-check','#0057B8', lista.length, 'Reuniões no período', lista.length?`${fmtData(lista[0].data)} a ${fmtData(lista[lista.length-1].data)}`:'—')
     + card('fa-users','#1d4ed8', ativos().length, 'Participantes ativos', `${db.participantes.length} cadastrados`)
     + card('fa-user-check','#0891b2', media.toFixed(1), 'Média de presentes', 'por reunião');
 
