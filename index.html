@@ -213,6 +213,18 @@
             </div>
           </div>
           <p class="text-[12px] text-slate-500 mt-3">Usa apenas participantes <b>ativos</b>, na ordem da lista do Admin. As semanas geradas são adicionadas ao final da escala existente.</p>
+          <hr class="my-4 border-slate-200">
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <label class="flex items-center gap-2 text-[13px] text-slate-600">
+              <input type="checkbox" id="chkEncadear" class="w-4 h-4 accent-[#0057B8]">
+              <span>Datas <b>encadeadas</b> — ao mudar uma data, as seguintes seguem de semana em semana</span></label>
+            <label class="flex items-center gap-2 text-[13px] text-slate-600">
+              <input type="checkbox" id="chkFeriados" class="w-4 h-4 accent-[#0057B8]">
+              <span>Pular <b>feriados</b></span></label>
+            <button class="btn btn-outline btn-sm" onclick="abrirFeriados()"><i class="fa-solid fa-calendar-xmark"></i> Feriados</button>
+            <button class="btn btn-outline btn-sm" onclick="recalcularEscala()"><i class="fa-solid fa-arrows-rotate"></i> Recalcular datas</button>
+          </div>
+          <div id="escAviso"></div>
         </div>
         <div class="card">
           <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -334,7 +346,8 @@ const DB_KEY = 'reuniaoSeguranca_v1';
 const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const MESES_ABR = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
-let db = { participantes:[], reunioes:[], escala:[], config:{ contarJustificado:false } };
+const CFG_PADRAO = { contarJustificado:false, pularFeriados:true, encadearDatas:true };
+let db = { participantes:[], reunioes:[], escala:[], feriados:[], config:Object.assign({},CFG_PADRAO) };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 function save(){ localStorage.setItem(DB_KEY, JSON.stringify(db)); }
@@ -346,7 +359,10 @@ function load(){
       db.participantes = d.participantes || [];
       db.reunioes = d.reunioes || [];
       db.escala = d.escala || [];
-      db.config = Object.assign({ contarJustificado:false }, d.config || {});
+      // a ordem do array é a ordem de apresentação; dados antigos vinham por data
+      db.escala.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+      db.feriados = d.feriados || [];
+      db.config = Object.assign({}, CFG_PADRAO, d.config || {});
     }
   } catch(e){ console.error('Falha ao ler dados', e); }
 }
@@ -583,8 +599,13 @@ function importarBackup(input){
       db.participantes = d.participantes || [];
       db.reunioes = d.reunioes || [];
       db.escala = d.escala || [];
-      db.config = Object.assign({contarJustificado:false}, d.config||{});
-      save(); iniciarFiltros(); renderAll(); toast('Backup restaurado.');
+      db.feriados = d.feriados || [];
+      db.config = Object.assign({}, CFG_PADRAO, d.config||{});
+      save(); iniciarFiltros(); renderAll();
+      document.getElementById('chkJust').checked = !!db.config.contarJustificado;
+      document.getElementById('chkEncadear').checked = db.config.encadearDatas !== false;
+      document.getElementById('chkFeriados').checked = db.config.pularFeriados !== false;
+      toast('Backup restaurado.');
     } catch(err){ toast('Erro: '+err.message, 'erro'); }
     input.value='';
   };
@@ -593,7 +614,7 @@ function importarBackup(input){
 function apagarTudo(){
   if (!confirm('Apagar TODOS os dados (participantes, reuniões e escala)?\n\nIsso não pode ser desfeito. Exporte um backup antes se precisar.')) return;
   if (!confirm('Confirma definitivamente?')) return;
-  db = { participantes:[], reunioes:[], escala:[], config:{contarJustificado:false} };
+  db = { participantes:[], reunioes:[], escala:[], feriados:[], config:Object.assign({},CFG_PADRAO) };
   save(); iniciarFiltros(); renderAll(); toast('Dados apagados.');
 }
 function exportarParticipantesCSV(){
@@ -734,11 +755,97 @@ function renderReunioes(){
   document.getElementById('tabReunioes').innerHTML = h + '</tbody>';
 }
 
+/* =============== FERIADOS =============== */
+function pascoa(ano){ // algoritmo de Meeus/Butcher
+  const a=ano%19, b=Math.floor(ano/100), c=ano%100, d=Math.floor(b/4), e=b%4,
+        f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3), h=(19*a+b-d-g+15)%30,
+        i=Math.floor(c/4), k=c%4, l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451),
+        mes=Math.floor((h+l-7*m+114)/31), dia=((h+l-7*m+114)%31)+1;
+  return new Date(ano, mes-1, dia, 12, 0, 0);
+}
+function isoDe(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function maisDias(base, n){ const d = new Date(base.getTime()); d.setDate(d.getDate()+n); return d; }
+const _cacheFer = {};
+function feriadosNacionais(ano){
+  if (_cacheFer[ano]) return _cacheFer[ano];
+  const p = pascoa(ano);
+  const l = [
+    [`${ano}-01-01`,'Confraternização Universal'],
+    [isoDe(maisDias(p,-48)),'Carnaval (segunda)'],
+    [isoDe(maisDias(p,-47)),'Carnaval (terça)'],
+    [isoDe(maisDias(p,-2)),'Sexta-feira Santa'],
+    [`${ano}-04-21`,'Tiradentes'],
+    [`${ano}-05-01`,'Dia do Trabalho'],
+    [isoDe(maisDias(p,60)),'Corpus Christi'],
+    [`${ano}-09-07`,'Independência do Brasil'],
+    [`${ano}-10-12`,'N. Sra. Aparecida'],
+    [`${ano}-11-02`,'Finados'],
+    [`${ano}-11-15`,'Proclamação da República'],
+    [`${ano}-11-20`,'Consciência Negra'],
+    [`${ano}-12-25`,'Natal']
+  ].map(([data,nome])=>({ data, nome, nacional:true }));
+  _cacheFer[ano] = l;
+  return l;
+}
+function nomeFeriado(iso){
+  if (!iso) return null;
+  const custom = (db.feriados||[]).find(f=>f.data===iso);
+  if (custom) return custom.nome || 'Feriado';
+  const nac = feriadosNacionais(+iso.slice(0,4)).find(f=>f.data===iso);
+  return nac ? nac.nome : null;
+}
+
 /* =============== ESCALA =============== */
 function proximaData(iso, semanas){
   const d = new Date(iso+'T12:00:00');
   d.setDate(d.getDate() + 7*semanas);
   return d.toISOString().slice(0,10);
+}
+/** Avança de 7 em 7 dias enquanto a data cair em feriado. */
+function dataUtilSemanal(iso){
+  if (db.config.pularFeriados === false) return { data:iso, pulados:[] };
+  let d = iso, pulados = [], guarda = 0;
+  while (nomeFeriado(d) && guarda++ < 12) { pulados.push({ data:d, nome:nomeFeriado(d) }); d = proximaData(d,1); }
+  return { data:d, pulados };
+}
+/** Reencadeia as datas a partir de uma linha: 1 por semana, pulando feriados.
+ *  Linhas com status "realizado" não são movidas (são histórico) e servem de âncora. */
+function reencadearEscala(idInicial){
+  const lista = db.escala; // ordem do array = ordem de apresentação
+  const i0 = lista.findIndex(e=>e.id===idInicial);
+  if (i0 < 0) return { movidas:0, pulados:[] };
+  const r0 = dataUtilSemanal(lista[i0].data);
+  lista[i0].data = r0.data;
+  let ancora = r0.data, movidas = 0, pulados = [...r0.pulados];
+  for (let i=i0+1;i<lista.length;i++){
+    const e = lista[i];
+    if (e.status === 'realizado') { ancora = e.data || ancora; continue; }
+    const r = dataUtilSemanal(proximaData(ancora,1));
+    if (e.data !== r.data) movidas++;
+    e.data = r.data;
+    pulados.push(...r.pulados);
+    ancora = r.data;
+  }
+  save();
+  return { movidas, pulados };
+}
+function recalcularEscala(){
+  const primeira = db.escala.find(e=>e.status!=='realizado') || db.escala[0];
+  if (!primeira) { toast('Escala vazia.','erro'); return; }
+  const r = reencadearEscala(primeira.id);
+  renderEscala();
+  toast(r.movidas ? `${r.movidas} data(s) recalculada(s).` : 'Datas já estavam corretas.');
+  if (r.pulados.length) avisoFeriados(r.pulados);
+}
+function avisoFeriados(pulados){
+  const vistos = [...new Map(pulados.map(p=>[p.data,p])).values()];
+  const el = document.getElementById('escAviso');
+  if (!el) return;
+  el.innerHTML = vistos.length
+    ? `<div class="rounded-lg px-3 py-2 bg-amber-50 text-amber-800 text-[13px] mt-3">
+        <i class="fa-solid fa-calendar-xmark mr-1"></i> Feriado(s) pulado(s):
+        ${vistos.map(p=>`<b>${fmtData(p.data)}</b> (${esc(p.nome)})`).join(' · ')} — as apresentações seguiram para a semana seguinte.</div>`
+    : '';
 }
 function gerarEscala(){
   const ini = document.getElementById('escIni').value;
@@ -752,26 +859,96 @@ function gerarEscala(){
 
   let pos = 0;
   if (modo==='continuar' && db.escala.length) {
-    const ult = [...db.escala].sort((a,b)=>(a.data||'').localeCompare(b.data||'')).pop();
+    const ult = db.escala[db.escala.length-1];
     const i = pool.findIndex(p=>p.id===ult.participante);
     if (i>=0) pos = i+1;
   }
+  let data = dataUtilSemanal(ini), pulados = [...data.pulados];
   for (let k=0;k<qtd;k++){
     const p = pool[(pos+k) % pool.length];
-    db.escala.push({ id:uid(), data: proximaData(ini,k), participante:p.id, tema, status:'agendado', obs:'' });
+    db.escala.push({ id:uid(), data: data.data, participante:p.id, tema, status:'agendado', obs:'' });
+    if (k < qtd-1) { data = dataUtilSemanal(proximaData(data.data,1)); pulados.push(...data.pulados); }
   }
   save(); renderEscala(); toast(`${qtd} semana(s) gerada(s) no rodízio.`);
+  avisoFeriados(pulados);
 }
 function addLinhaEscala(){
   const pool = ativos();
   if (!pool.length) { toast('Cadastre participantes no Admin.','erro'); return; }
-  const ult = [...db.escala].sort((a,b)=>(a.data||'').localeCompare(b.data||'')).pop();
-  db.escala.push({ id:uid(), data: ult ? proximaData(ult.data,1) : hojeISO(), participante:pool[0].id, tema:'', status:'agendado', obs:'' });
-  save(); renderEscala();
+  const ult = db.escala[db.escala.length-1];
+  const alvo = dataUtilSemanal(ult ? proximaData(ult.data,1) : hojeISO());
+  db.escala.push({ id:uid(), data: alvo.data, participante:pool[0].id, tema:'', status:'agendado', obs:'' });
+  save(); renderEscala(); avisoFeriados(alvo.pulados);
+}
+
+/* ---- cadastro de feriados ---- */
+function abrirFeriados(){
+  const anos = [...new Set([...db.escala.map(e=>(e.data||'').slice(0,4)), String(new Date().getFullYear())].filter(Boolean))].sort();
+  const nacionais = anos.flatMap(a=>feriadosNacionais(+a)).sort((a,b)=>a.data.localeCompare(b.data));
+  const custom = [...(db.feriados||[])].sort((a,b)=>a.data.localeCompare(b.data));
+  document.getElementById('modalHost').innerHTML = `
+  <div class="modal-bg" onclick="if(event.target===this) fecharModal()">
+    <div class="modal" style="max-width:720px">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+        <h3 class="font-bold text-slate-800 text-lg">Feriados considerados</h3>
+        <button class="text-slate-400 hover:text-slate-700 text-xl" onclick="fecharModal()">&times;</button>
+      </div>
+      <div class="p-6">
+        <h4 class="font-bold text-slate-800 text-[14px] mb-2">Feriados da empresa / municipais</h4>
+        <p class="text-[12px] text-slate-500 mb-3">Cadastre aqui feriado municipal, ponto facultativo adotado ou parada programada. Estes também são pulados na escala.</p>
+        <div class="flex gap-2 items-end mb-3">
+          <div><label class="form-label">Data</label><input type="date" id="ferData" class="form-input" style="width:165px"></div>
+          <div class="flex-1"><label class="form-label">Descrição</label><input id="ferNome" class="form-input" placeholder="Ex.: Aniversário da cidade"></div>
+          <button class="btn btn-primary" onclick="addFeriado()"><i class="fa-solid fa-plus"></i> Adicionar</button>
+        </div>
+        <div class="border border-slate-200 rounded-xl overflow-hidden mb-6">
+          <table><tbody>
+          ${custom.length ? custom.map(f=>`<tr>
+              <td style="width:130px" class="font-semibold">${fmtData(f.data)}</td>
+              <td class="text-slate-500">${diaSemana(f.data)}</td>
+              <td>${esc(f.nome)}</td>
+              <td class="text-right"><button class="btn btn-danger btn-sm" onclick="delFeriado('${f.data}')"><i class="fa-solid fa-trash"></i></button></td>
+            </tr>`).join('') : `<tr><td class="text-center text-slate-400 py-5">Nenhum feriado próprio cadastrado.</td></tr>`}
+          </tbody></table>
+        </div>
+        <h4 class="font-bold text-slate-800 text-[14px] mb-2">Feriados nacionais (automáticos)</h4>
+        <p class="text-[12px] text-slate-500 mb-3">Calculados pelo app para cada ano, inclusive os que mudam de data (Carnaval, Sexta-feira Santa, Corpus Christi).</p>
+        <div class="border border-slate-200 rounded-xl overflow-hidden" style="max-height:34vh;overflow-y:auto">
+          <table><tbody>
+          ${nacionais.map(f=>{ const seg = diaSemana(f.data)==='Seg';
+            return `<tr><td style="width:130px" class="${seg?'font-bold text-blue-800':''}">${fmtData(f.data)}</td>
+              <td class="${seg?'font-bold text-blue-800':'text-slate-500'}">${diaSemana(f.data)}</td>
+              <td>${esc(f.nome)} ${seg?'<span class="badge b-blue ml-1">cai na segunda</span>':''}</td></tr>`; }).join('')}
+          </tbody></table>
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-slate-200 flex justify-end">
+        <button class="btn btn-primary" onclick="fecharModal();recalcularEscala()"><i class="fa-solid fa-check"></i> Fechar e recalcular escala</button>
+      </div>
+    </div></div>`;
+}
+function addFeriado(){
+  const data = document.getElementById('ferData').value;
+  const nome = document.getElementById('ferNome').value.trim();
+  if (!data) { toast('Informe a data.','erro'); return; }
+  db.feriados = (db.feriados||[]).filter(f=>f.data!==data);
+  db.feriados.push({ data, nome: nome || 'Feriado' });
+  save(); abrirFeriados(); toast('Feriado cadastrado.');
+}
+function delFeriado(data){
+  db.feriados = (db.feriados||[]).filter(f=>f.data!==data);
+  save(); abrirFeriados();
 }
 function updEscala(id, campo, valor){
   const e = db.escala.find(x=>x.id===id); if(!e) return;
   e[campo] = valor; save();
+  if (campo==='data' && db.config.encadearDatas !== false) {
+    const r = reencadearEscala(id);
+    renderEscala();
+    if (r.movidas) toast(`Data alterada — ${r.movidas} apresentação(ões) seguinte(s) reajustada(s).`);
+    avisoFeriados(r.pulados);
+    return;
+  }
   if (campo==='data' || campo==='status') renderEscala();
 }
 function excluirEscala(id){ db.escala = db.escala.filter(e=>e.id!==id); save(); renderEscala(); }
@@ -781,7 +958,7 @@ function limparEscala(){
   db.escala = []; save(); renderEscala(); toast('Escala apagada.');
 }
 function renderEscala(){
-  const lista = [...db.escala].sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  const lista = db.escala;
   const opts = p => db.participantes.filter(x=>x.ativo!==false || x.id===p)
       .map(x=>`<option value="${x.id}" ${x.id===p?'selected':''}>${esc(x.nome)}</option>`).join('');
   const hoje = hojeISO();
@@ -789,13 +966,14 @@ function renderEscala(){
   if (!lista.length) h += `<tr><td colspan="8" class="text-center text-slate-400 py-8">Nenhuma escala. Use "Gerar" acima para criar o rodízio.</td></tr>`;
   lista.forEach((e,i)=>{
     const atrasado = e.status==='agendado' && e.data < hoje;
+    const fer = nomeFeriado(e.data);
     const badge = e.status==='realizado' ? '<span class="badge b-green">Realizado</span>'
                 : e.status==='remarcado' ? '<span class="badge b-amber">Remarcado</span>'
                 : atrasado ? '<span class="badge b-red">Pendente</span>' : '<span class="badge b-blue">Agendado</span>';
     h += `<tr>
       <td class="text-slate-400 font-semibold">${i+1}</td>
       <td><input type="date" class="form-input no-print" style="padding:5px 8px" value="${e.data||''}" onchange="updEscala('${e.id}','data',this.value)"><span class="hidden print:inline">${fmtData(e.data)}</span></td>
-      <td class="text-slate-500">${diaSemana(e.data)}</td>
+      <td class="text-slate-500">${diaSemana(e.data)}${fer?`<br><span class="badge b-amber mt-1" title="${esc(fer)}"><i class="fa-solid fa-triangle-exclamation"></i> feriado</span>`:''}</td>
       <td><select class="form-input no-print" style="padding:5px 8px" onchange="updEscala('${e.id}','participante',this.value)">${opts(e.participante)}</select><span class="hidden print:inline">${esc(nomePart(e.participante))}</span></td>
       <td><input class="form-input no-print" style="padding:5px 8px" value="${esc(e.tema||'')}" placeholder="Tema da apresentação" onchange="updEscala('${e.id}','tema',this.value)"><span class="hidden print:inline">${esc(e.tema||'')}</span></td>
       <td>${badge}
@@ -821,7 +999,7 @@ function chamadaDaEscala(id){
 }
 function exportarEscalaCSV(){
   let csv = 'Data;Dia;Apresentador;Tema;Status;Observacao\n';
-  [...db.escala].sort((a,b)=>(a.data||'').localeCompare(b.data||'')).forEach(e=>{
+  db.escala.forEach(e=>{
     csv += [fmtData(e.data),diaSemana(e.data),nomePart(e.participante),e.tema,e.status,e.obs]
       .map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(';')+'\n';
   });
@@ -1280,10 +1458,14 @@ document.getElementById('dashAno').onchange = renderDashboard;
 document.getElementById('dashMes').onchange = renderDashboard;
 document.getElementById('buscaDash').oninput = ()=>{ const l=reunioesFiltradas(); renderIndividual(l); renderMensal(l); };
 document.getElementById('chkJust').onchange = e=>{ db.config.contarJustificado = e.target.checked; save(); renderAll(); };
+document.getElementById('chkEncadear').onchange = e=>{ db.config.encadearDatas = e.target.checked; save(); };
+document.getElementById('chkFeriados').onchange = e=>{ db.config.pularFeriados = e.target.checked; save(); renderEscala(); };
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') fecharModal(); });
 
 load();
 document.getElementById('chkJust').checked = !!db.config.contarJustificado;
+document.getElementById('chkEncadear').checked = db.config.encadearDatas !== false;
+document.getElementById('chkFeriados').checked = db.config.pularFeriados !== false;
 document.getElementById('wrapAno').style.display = 'none';
 document.getElementById('escIni').value = hojeISO();
 renderAll();
