@@ -181,8 +181,9 @@
       <div class="nav-item" data-view="admin"><i class="fa-solid fa-users-gear"></i> Admin</div>
     </nav>
     <div class="px-5 mt-4 text-[11px] text-blue-100/55 leading-relaxed">
-      Dados salvos neste navegador.<br>Use <b>Backup</b> no Admin para levar a outro PC.
+      Backup em <b>Admin</b> guarda uma cópia do que está aqui.
     </div>
+    <div id="statusNuvem" class="text-[11px] text-blue-100/60 px-5 mt-2"></div>
     <div class="px-4 mt-5 pt-4 border-t border-white/10">
       <div class="flex items-center gap-2.5 px-1">
         <div class="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center shrink-0">
@@ -467,7 +468,8 @@ let db = { participantes:[], reunioes:[], escala:[], feriados:[], usuarios:[], c
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 let avisouStorage = false;
-function save(){
+function save(){ salvarLocal(); agendarSubida(); }
+function salvarLocal(){
   try { localStorage.setItem(DB_KEY, JSON.stringify(db)); }
   catch(e){
     console.error('Falha ao gravar dados', e);
@@ -1738,6 +1740,239 @@ document.getElementById('chkEncadear').onchange = e=>{ db.config.encadearDatas =
 document.getElementById('chkFeriados').onchange = e=>{ db.config.pularFeriados = e.target.checked; save(); renderEscala(); };
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') fecharModal(); });
 
+
+/* =============== NUVEM (Firebase) =============== */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyC7U_a9Jjk1OAPD9PFzusTvfL5P_zYNIbg",
+  authDomain: "reuniao-seguranca.firebaseapp.com",
+  projectId: "reuniao-seguranca",
+  storageBucket: "reuniao-seguranca.firebasestorage.app",
+  messagingSenderId: "1082121205678",
+  appId: "1:1082121205678:web:13a84813d05696b3a4ba3f"
+};
+const FB_VER = '10.12.5';
+const COLECOES = ['participantes','reunioes','escala','feriados'];
+let fb = null;            // { auth, fs }
+let modoNuvem = false;    // true quando o Firebase respondeu
+let ouvintes = [];        // cancelamento dos onSnapshot
+let ultimoEnviado = {};   // colecao -> { id: json } do que ja esta na nuvem
+let subidaAgendada = null;
+let sincronizando = false;
+
+function carregarScript(src){
+  return new Promise((ok, err)=>{
+    const s = document.createElement('script');
+    s.src = src; s.onload = ()=>ok(); s.onerror = ()=>err(new Error('falha ao carregar '+src));
+    document.head.appendChild(s);
+  });
+}
+async function iniciarNuvem(){
+  if (!FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey) return false;
+  try {
+    const base = 'https://www.gstatic.com/firebasejs/' + FB_VER + '/';
+    await carregarScript(base + 'firebase-app-compat.js');
+    await carregarScript(base + 'firebase-auth-compat.js');
+    await carregarScript(base + 'firebase-firestore-compat.js');
+    firebase.initializeApp(FIREBASE_CONFIG);
+    fb = { auth: firebase.auth(), fs: firebase.firestore() };
+    try { await fb.fs.enablePersistence({ synchronizeTabs:true }); } catch(e){ /* varias abas / navegador sem suporte */ }
+    modoNuvem = true;
+    return true;
+  } catch(e){
+    console.warn('Nuvem indisponível — seguindo com os dados locais.', e);
+    modoNuvem = false;
+    return false;
+  }
+}
+function statusNuvem(txt, cor){
+  const el = document.getElementById('statusNuvem');
+  if (!el) return;
+  const cores = { ok:'text-green-200', erro:'text-red-200', aviso:'text-amber-200' };
+  el.className = 'text-[11px] ' + (cores[cor] || 'text-blue-100/60') + ' px-5 mt-2';
+  el.innerHTML = txt;
+}
+
+/* ---- ids estáveis: os dois computadores precisam gerar a mesma chave ---- */
+function idParticipante(p){
+  const base = p.matricula ? 'm' + norm(p.matricula) : 'n' + norm(p.nome);
+  return base.replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,90) || uid();
+}
+function normalizarIds(){
+  const de = {};
+  db.participantes.forEach(p=>{
+    const novo = idParticipante(p);
+    if (novo !== p.id && !db.participantes.some(x=>x!==p && x.id===novo)) { de[p.id] = novo; p.id = novo; }
+  });
+  if (Object.keys(de).length){
+    db.reunioes.forEach(r=>{
+      if (r.apresentador && de[r.apresentador]) r.apresentador = de[r.apresentador];
+      const np = {};
+      Object.entries(r.presencas||{}).forEach(([k,v])=> np[de[k] || k] = v);
+      r.presencas = np;
+    });
+    db.escala.forEach(e=>{ if (e.participante && de[e.participante]) e.participante = de[e.participante]; });
+  }
+  db.reunioes.forEach(r=>{ if (r.data) r.id = 'd' + r.data; });
+  db.escala.forEach(e=>{ if (e.data) e.id = 'd' + e.data; });
+  (db.feriados||[]).forEach(f=>{ f.id = 'd' + f.data; });
+}
+function registrosDe(col){ return (db[col] || []).filter(x=>x && x.id); }
+
+/* ---- primeira sincronização: junta nuvem + local sem perder nada ---- */
+async function baixarTudo(){
+  const nuvem = {};
+  for (const c of COLECOES){
+    const snap = await fb.fs.collection(c).get();
+    nuvem[c] = snap.docs.map(d=>Object.assign({ id:d.id }, d.data()));
+  }
+  const cfg = await fb.fs.doc('config/app').get();
+  nuvem.config = cfg.exists ? cfg.data() : null;
+  return nuvem;
+}
+function juntarNuvemNoLocal(nuvem){
+  const r = { baixados:0, conflitos:0 };
+  // participantes: mesma matrícula/nome = mesma pessoa, adota o id da nuvem
+  (nuvem.participantes||[]).forEach(p=>{
+    const local = db.participantes.find(x => x.id === p.id ||
+      (p.matricula && x.matricula && norm(x.matricula)===norm(p.matricula)) || norm(x.nome)===norm(p.nome));
+    if (!local) { db.participantes.push(p); r.baixados++; }
+    else {
+      const idAntigo = local.id;
+      Object.keys(p).forEach(c=>{ if (local[c] === undefined || local[c] === '') local[c] = p[c]; });
+      local.id = p.id;
+      if (idAntigo !== p.id) {
+        db.reunioes.forEach(x=>{
+          if (x.apresentador === idAntigo) x.apresentador = p.id;
+          if (x.presencas && x.presencas[idAntigo] !== undefined) { x.presencas[p.id] = x.presencas[idAntigo]; delete x.presencas[idAntigo]; }
+        });
+        db.escala.forEach(x=>{ if (x.participante === idAntigo) x.participante = p.id; });
+      }
+    }
+  });
+  // reuniões: mesma data = mesma reunião; presenças que faltam são acrescentadas
+  (nuvem.reunioes||[]).forEach(rem=>{
+    const local = db.reunioes.find(x=>x.id === rem.id || x.data === rem.data);
+    if (!local) { db.reunioes.push(rem); r.baixados++; return; }
+    local.id = rem.id;
+    ['tema','local','obs','apresentador'].forEach(c=>{ if (!local[c] && rem[c]) local[c] = rem[c]; });
+    local.presencas = local.presencas || {};
+    Object.entries(rem.presencas||{}).forEach(([k,v])=>{
+      if (local.presencas[k] === undefined) local.presencas[k] = v;
+      else if (local.presencas[k] !== v) r.conflitos++;
+    });
+  });
+  // escala e feriados: o que ainda não existe na mesma data
+  (nuvem.escala||[]).forEach(e=>{ if (!db.escala.some(x=>x.id===e.id || x.data===e.data)) { db.escala.push(e); r.baixados++; } });
+  db.escala.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  if (!db.feriados) db.feriados = [];
+  (nuvem.feriados||[]).forEach(f=>{ if (!db.feriados.some(x=>x.data===f.data)) { db.feriados.push(f); r.baixados++; } });
+  if (nuvem.config) db.config = Object.assign({}, CFG_PADRAO, nuvem.config, db.config);
+  return r;
+}
+async function enviarTudo(){
+  let lote = fb.fs.batch(), n = 0, total = 0;
+  for (const c of COLECOES){
+    ultimoEnviado[c] = ultimoEnviado[c] || {};
+    for (const reg of registrosDe(c)){
+      const corpo = Object.assign({}, reg); delete corpo.id;
+      lote.set(fb.fs.collection(c).doc(reg.id), corpo);
+      ultimoEnviado[c][reg.id] = JSON.stringify(corpo);
+      total++;
+      if (++n >= 400) { await lote.commit(); lote = fb.fs.batch(); n = 0; }
+    }
+  }
+  lote.set(fb.fs.doc('config/app'), db.config);
+  await lote.commit();
+  return total;
+}
+/** Envia só o que mudou desde a última subida (e apaga o que foi removido aqui). */
+async function enviarMudancas(){
+  if (!modoNuvem || !usuarioAtual) return;
+  try {
+    let lote = fb.fs.batch(), n = 0;
+    for (const c of COLECOES){
+      ultimoEnviado[c] = ultimoEnviado[c] || {};
+      const vistos = {};
+      for (const reg of registrosDe(c)){
+        const corpo = Object.assign({}, reg); delete corpo.id;
+        const txt = JSON.stringify(corpo);
+        vistos[reg.id] = true;
+        if (ultimoEnviado[c][reg.id] !== txt){
+          lote.set(fb.fs.collection(c).doc(reg.id), corpo);
+          ultimoEnviado[c][reg.id] = txt; n++;
+        }
+      }
+      Object.keys(ultimoEnviado[c]).forEach(id=>{
+        if (!vistos[id]) { lote.delete(fb.fs.collection(c).doc(id)); delete ultimoEnviado[c][id]; n++; }
+      });
+    }
+    const cfgTxt = JSON.stringify(db.config);
+    if (ultimoEnviado._config !== cfgTxt) { lote.set(fb.fs.doc('config/app'), db.config); ultimoEnviado._config = cfgTxt; n++; }
+    if (n) { await lote.commit(); statusNuvem('<i class="fa-solid fa-cloud-arrow-up"></i> sincronizado', 'ok'); }
+  } catch(e){
+    console.warn('Falha ao enviar para a nuvem', e);
+    statusNuvem('<i class="fa-solid fa-cloud-slash"></i> sem sincronizar — salvo neste PC', 'aviso');
+  }
+}
+function agendarSubida(){
+  if (!modoNuvem || !usuarioAtual || sincronizando) return;
+  clearTimeout(subidaAgendada);
+  subidaAgendada = setTimeout(enviarMudancas, 800);
+}
+/** Escuta as mudanças feitas no outro computador. */
+function escutarNuvem(){
+  ouvintes.forEach(f=>{ try{ f(); }catch(e){} });
+  ouvintes = [];
+  COLECOES.forEach(c=>{
+    ouvintes.push(fb.fs.collection(c).onSnapshot(snap=>{
+      if (sincronizando) return;
+      let mudou = false;
+      snap.docChanges().forEach(ch=>{
+        if (ch.doc.metadata.hasPendingWrites) return; // eco da nossa própria gravação
+        const id = ch.doc.id;
+        const lista = db[c] = db[c] || [];
+        const i = lista.findIndex(x=>x.id === id);
+        if (ch.type === 'removed'){ if (i>=0){ lista.splice(i,1); mudou = true; } delete (ultimoEnviado[c]||{})[id]; }
+        else {
+          const reg = Object.assign({ id }, ch.doc.data());
+          if (i>=0) lista[i] = reg; else lista.push(reg);
+          ultimoEnviado[c] = ultimoEnviado[c] || {};
+          ultimoEnviado[c][id] = JSON.stringify(ch.doc.data());
+          mudou = true;
+        }
+      });
+      if (mudou){
+        if (c === 'escala') db.escala.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+        salvarLocal(); renderAll();
+        statusNuvem('<i class="fa-solid fa-cloud-arrow-down"></i> atualizado agora', 'ok');
+      }
+    }, err=>{
+      console.warn('Ouvinte da nuvem parou', err);
+      statusNuvem('<i class="fa-solid fa-cloud-slash"></i> sem conexão com a nuvem', 'aviso');
+    }));
+  });
+}
+async function sincronizarPrimeiraVez(){
+  sincronizando = true;
+  statusNuvem('<i class="fa-solid fa-rotate fa-spin"></i> sincronizando...', '');
+  try {
+    normalizarIds();
+    const nuvem = await baixarTudo();
+    const r = juntarNuvemNoLocal(nuvem);
+    salvarLocal();
+    const enviados = await enviarTudo();
+    sincronizando = false;
+    escutarNuvem();
+    statusNuvem('<i class="fa-solid fa-cloud"></i> sincronizado com a nuvem', 'ok');
+    console.log(`Nuvem: ${r.baixados} registro(s) baixado(s), ${enviados} enviado(s), ${r.conflitos} conflito(s).`);
+    if (r.conflitos) toast(`${r.conflitos} presença(s) diferiam entre os dois lados — mantive o que estava neste computador.`);
+  } catch(e){
+    sincronizando = false;
+    console.error('Falha na sincronização', e);
+    statusNuvem('<i class="fa-solid fa-cloud-slash"></i> offline — dados salvos neste PC', 'aviso');
+    toast('Não consegui falar com a nuvem agora. O app segue funcionando com os dados deste computador.','erro');
+  }
+}
 /* =============== USUÁRIOS / LOGIN =============== */
 const SESSAO_KEY = 'reuniaoSeguranca_sessao';
 const USUARIO_PADRAO = { usuario:'admin', senha:'admin123' };
@@ -1791,6 +2026,7 @@ function mostrarLogin(){
   setTimeout(()=>document.getElementById('loginUser').focus(), 60);
 }
 async function fazerLogin(){
+  if (modoNuvem) return loginNuvem();
   const u = document.getElementById('loginUser').value.trim();
   const s = document.getElementById('loginSenha').value;
   const erro = document.getElementById('loginErro');
@@ -1834,6 +2070,7 @@ function cancelarPrimeiraSenha(){
   setTimeout(()=>document.getElementById('loginUser').focus(), 60);
 }
 async function salvarPrimeiraSenha(){
+  if (aguardandoPrimeiraSenha && aguardandoPrimeiraSenha.nuvem) return salvarPrimeiraSenhaNuvem();
   const user = aguardandoPrimeiraSenha;
   if (!user) { cancelarPrimeiraSenha(); return; }
   const s1 = document.getElementById('nsSenha1').value;
@@ -1865,11 +2102,13 @@ function abrirApp(){
 }
 function sair(){
   if (!confirm('Sair do aplicativo?')) return;
+  if (modoNuvem) return sairNuvem();
   try { localStorage.removeItem(SESSAO_KEY); sessionStorage.removeItem(SESSAO_KEY); } catch(e){}
   usuarioAtual = null;
   location.reload();
 }
 function avisoSenhaPadrao(){
+  if (modoNuvem) { const e = document.getElementById('avisoSenha'); if (e) e.style.display='none'; return; }
   const el = document.getElementById('avisoSenha');
   if (!el) return;
   const eu = (db.usuarios||[]).find(u=>u.id === (usuarioAtual||{}).id);
@@ -1878,6 +2117,7 @@ function avisoSenhaPadrao(){
 
 /* ---- gestão de acessos ---- */
 async function criarUsuario(){
+  if (modoNuvem) return criarUsuarioNuvem();
   const login = document.getElementById('uLogin').value.trim();
   const nome  = document.getElementById('uNome').value.trim();
   const senha = document.getElementById('uSenha').value;
@@ -1919,7 +2159,177 @@ function excluirUsuario(id){
   db.usuarios = db.usuarios.filter(x=>x.id!==id);
   save(); renderUsuarios(); toast('Acesso excluído.');
 }
+
+/* ---- login pela nuvem ---- */
+let usuariosNuvem = [];
+const ERROS_FB = {
+  'auth/invalid-email':'E-mail inválido.',
+  'auth/user-not-found':'E-mail ou senha inválidos.',
+  'auth/wrong-password':'E-mail ou senha inválidos.',
+  'auth/invalid-credential':'E-mail ou senha inválidos.',
+  'auth/user-disabled':'Este acesso foi desativado.',
+  'auth/too-many-requests':'Muitas tentativas. Aguarde alguns minutos e tente de novo.',
+  'auth/network-request-failed':'Sem conexão com a internet.',
+  'auth/unauthorized-domain':'Este endereço não está autorizado no Firebase (Authentication → Settings → Domínios autorizados).',
+  'auth/operation-not-allowed':'O login por e-mail/senha não está ativado no Firebase.',
+  'auth/email-already-in-use':'Já existe um acesso com este e-mail.',
+  'auth/weak-password':'A senha precisa de pelo menos 6 caracteres.',
+  'auth/requires-recent-login':'Por segurança, saia e entre de novo antes de trocar a senha.',
+  'auth/configuration-not-found':'O login por e-mail/senha ainda não foi ativado no Firebase.',
+  'auth/unsupported-persistence-type':'Este navegador está bloqueando o armazenamento — libere os cookies deste site.'
+};
+const msgFB = e => ERROS_FB[e && e.code] || (e && e.message) || 'Não foi possível concluir.';
+
+async function loginNuvem(){
+  const email = document.getElementById('loginUser').value.trim();
+  const senha = document.getElementById('loginSenha').value;
+  const erro = document.getElementById('loginErro');
+  const falhar = m => { erro.textContent = m; erro.style.display=''; document.getElementById('loginSenha').value=''; };
+  if (!email || !senha) return falhar('Preencha e-mail e senha.');
+  try {
+    try {
+      const persist = document.getElementById('loginLembrar').checked
+        ? firebase.auth.Auth.Persistence.LOCAL : firebase.auth.Auth.Persistence.SESSION;
+      await fb.auth.setPersistence(persist);
+    } catch(e){ console.warn('Sem persistência de sessão neste navegador', e); }
+    await fb.auth.signInWithEmailAndPassword(email, senha);
+    erro.style.display = 'none'; // onAuthStateChanged assume daqui
+  } catch(e){ falhar(msgFB(e)); }
+}
+async function aposLoginNuvem(user){
+  if (usuarioAtual && usuarioAtual.id === user.uid) return;
+  let perfil = {};
+  try {
+    const ref = fb.fs.doc('usuarios/' + user.uid);
+    const d = await ref.get();
+    if (d.exists) perfil = d.data();
+    else { perfil = { email:user.email, nome:(user.email||'').split('@')[0], criadoEm:hojeISO() }; await ref.set(perfil); }
+  } catch(e){ console.warn('Perfil do usuário', e); perfil = { email:user.email, nome:(user.email||'').split('@')[0] }; }
+  usuarioAtual = { id:user.uid, usuario:user.email, nome:perfil.nome || user.email };
+  if (perfil.senhaProvisoria) { pedirPrimeiraSenhaNuvem(user, perfil); return; }
+  abrirApp();
+  await sincronizarPrimeiraVez();
+  await carregarUsuariosNuvem();
+}
+function pedirPrimeiraSenhaNuvem(user, perfil){
+  aguardandoPrimeiraSenha = { nuvem:true, user, perfil };
+  document.getElementById('painelLogin').style.display = 'none';
+  document.getElementById('painelNovaSenha').style.display = '';
+  document.getElementById('nsNome').textContent = perfil.nome || user.email;
+  document.getElementById('nsErro').style.display = 'none';
+  document.getElementById('nsSenha1').value = '';
+  document.getElementById('nsSenha2').value = '';
+  setTimeout(()=>document.getElementById('nsSenha1').focus(), 60);
+}
+async function salvarPrimeiraSenhaNuvem(){
+  const ctx = aguardandoPrimeiraSenha;
+  const s1 = document.getElementById('nsSenha1').value;
+  const s2 = document.getElementById('nsSenha2').value;
+  const erro = document.getElementById('nsErro');
+  const falhar = m => { erro.textContent = m; erro.style.display = ''; };
+  if (s1.length < 6) return falhar('A senha precisa de pelo menos 6 caracteres.');
+  if (s1 !== s2) return falhar('As duas senhas não são iguais.');
+  try {
+    await ctx.user.updatePassword(s1);
+    await fb.fs.doc('usuarios/' + ctx.user.uid).set({ senhaProvisoria:false }, { merge:true });
+  } catch(e){ return falhar(msgFB(e)); }
+  aguardandoPrimeiraSenha = null;
+  document.getElementById('painelNovaSenha').style.display = 'none';
+  document.getElementById('painelLogin').style.display = '';
+  usuarioAtual = { id:ctx.user.uid, usuario:ctx.user.email, nome:ctx.perfil.nome || ctx.user.email };
+  abrirApp();
+  await sincronizarPrimeiraVez();
+  await carregarUsuariosNuvem();
+  toast('Senha definida. Bem-vindo(a)!');
+}
+async function esqueciSenha(){
+  const email = (document.getElementById('loginUser').value || '').trim();
+  if (!email) { toast('Digite seu e-mail no campo acima primeiro.','erro'); return; }
+  if (!confirm('Enviar um link de redefinição de senha para ' + email + '?')) return;
+  try { await fb.auth.sendPasswordResetEmail(email); toast('Link enviado. Confira a caixa de entrada (e o spam).'); }
+  catch(e){ toast(msgFB(e),'erro'); }
+}
+async function sairNuvem(){
+  try { ouvintes.forEach(f=>{ try{ f(); }catch(e){} }); ouvintes = []; await fb.auth.signOut(); } catch(e){}
+  usuarioAtual = null;
+  location.reload();
+}
+
+/* ---- acessos na nuvem ---- */
+async function carregarUsuariosNuvem(){
+  if (!modoNuvem) return;
+  try {
+    const snap = await fb.fs.collection('usuarios').get();
+    usuariosNuvem = snap.docs.map(d=>Object.assign({ id:d.id }, d.data()));
+    renderUsuarios();
+  } catch(e){ console.warn('Lista de acessos', e); }
+}
+async function criarUsuarioNuvem(){
+  const email = document.getElementById('uLogin').value.trim();
+  const nome  = document.getElementById('uNome').value.trim();
+  const senha = document.getElementById('uSenha').value;
+  if (!email || !/@/.test(email)) { toast('Informe o e-mail da pessoa.','erro'); return; }
+  if (senha.length < 6) { toast('A senha provisória precisa de pelo menos 6 caracteres.','erro'); return; }
+  let secundario = null;
+  try {
+    // app separado para criar a conta sem derrubar a sua sessão
+    secundario = firebase.initializeApp(FIREBASE_CONFIG, 'criador-' + Date.now());
+    const cred = await secundario.auth().createUserWithEmailAndPassword(email, senha);
+    await fb.fs.doc('usuarios/' + cred.user.uid).set({
+      email, nome: nome || email.split('@')[0], senhaProvisoria:true, criadoEm:hojeISO()
+    });
+    await secundario.auth().signOut();
+    document.getElementById('uLogin').value = '';
+    document.getElementById('uNome').value = '';
+    document.getElementById('uSenha').value = '';
+    await carregarUsuariosNuvem();
+    toast('Acesso criado — a senha é provisória.');
+  } catch(e){ toast(msgFB(e),'erro'); }
+  finally { if (secundario) { try { await secundario.delete(); } catch(e){} } }
+}
+async function redefinirSenhaNuvem(id){
+  const u = usuariosNuvem.find(x=>x.id===id); if (!u) return;
+  if (usuarioAtual && usuarioAtual.id === id) {
+    const nova = prompt('Nova senha para você (mínimo 6 caracteres):');
+    if (nova === null) return;
+    if (nova.length < 6) { toast('Senha muito curta.','erro'); return; }
+    if (prompt('Digite novamente para confirmar:') !== nova) { toast('As senhas não conferem.','erro'); return; }
+    try { await fb.auth.currentUser.updatePassword(nova); toast('Senha alterada.'); }
+    catch(e){ toast(msgFB(e),'erro'); }
+    return;
+  }
+  if (!confirm('Enviar um link de redefinição de senha para ' + u.email + '?\n\nA pessoa escolhe a nova senha pelo e-mail.')) return;
+  try { await fb.auth.sendPasswordResetEmail(u.email); toast('Link enviado para ' + u.email + '.'); }
+  catch(e){ toast(msgFB(e),'erro'); }
+}
+async function removerUsuarioNuvem(id){
+  const u = usuariosNuvem.find(x=>x.id===id); if (!u) return;
+  if (usuarioAtual && usuarioAtual.id === id) { toast('Você não pode remover o seu próprio acesso.','erro'); return; }
+  if (!confirm('Remover ' + u.email + ' da lista de acessos?\n\nImportante: para bloquear a entrada de vez, a conta também precisa ser desativada no console do Firebase (Authentication → Users).')) return;
+  try { await fb.fs.doc('usuarios/'+id).delete(); await carregarUsuariosNuvem(); toast('Acesso removido da lista.'); }
+  catch(e){ toast(msgFB(e),'erro'); }
+}
+function renderUsuariosNuvem(){
+  const q = document.getElementById('qtdUsuarios');
+  if (q) q.textContent = usuariosNuvem.length + ' acesso(s)';
+  let h = '<thead><tr><th>E-mail</th><th>Nome</th><th>Criado em</th><th>Situação</th><th style="width:250px"></th></tr></thead><tbody>';
+  if (!usuariosNuvem.length) h += '<tr><td colspan="5" class="text-center text-slate-400 py-6">Carregando acessos…</td></tr>';
+  usuariosNuvem.forEach(u=>{
+    const eu = usuarioAtual && usuarioAtual.id === u.id;
+    h += '<tr>'
+      + '<td class="font-semibold text-slate-700">' + esc(u.email) + (eu?' <span class="badge b-blue ml-1">você</span>':'') + '</td>'
+      + '<td>' + (esc(u.nome)||'—') + '</td>'
+      + '<td class="text-slate-500">' + (u.criadoEm?fmtData(u.criadoEm):'—') + '</td>'
+      + '<td>' + (u.senhaProvisoria?'<span class="badge b-amber">senha provisória</span>':'<span class="badge b-green">senha definida</span>') + '</td>'
+      + '<td class="text-right whitespace-nowrap">'
+      + '<button class="btn btn-secondary btn-sm" onclick="redefinirSenhaNuvem(\'' + u.id + '\')"><i class="fa-solid fa-key"></i> ' + (eu?'Trocar senha':'Enviar link') + '</button> '
+      + (eu?'':'<button class="btn btn-danger btn-sm" onclick="removerUsuarioNuvem(\'' + u.id + '\')"><i class="fa-solid fa-trash"></i></button>')
+      + '</td></tr>';
+  });
+  document.getElementById('tabUsuarios').innerHTML = h + '</tbody>';
+}
 function renderUsuarios(){
+  if (modoNuvem) return renderUsuariosNuvem();
   const lista = db.usuarios || [];
   const q = document.getElementById('qtdUsuarios');
   if (q) q.textContent = lista.length + ' acesso(s)';
@@ -1949,7 +2359,55 @@ document.getElementById('chkEncadear').checked = db.config.encadearDatas !== fal
 document.getElementById('chkFeriados').checked = db.config.pularFeriados !== false;
 document.getElementById('wrapAno').style.display = 'none';
 document.getElementById('escIni').value = hojeISO();
+function ajustarTelaLoginNuvem(){
+  const lbl = document.querySelector('label[for="loginUser"]') ||
+              document.getElementById('loginUser').closest('div').querySelector('.form-label');
+  if (lbl) lbl.textContent = 'E-mail';
+  const c = document.getElementById('loginUser');
+  c.type = 'email'; c.setAttribute('autocomplete','username'); c.placeholder = 'seu.email@empresa.com.br';
+  if (!document.getElementById('linkEsqueci')){
+    const p = document.createElement('p');
+    p.id = 'linkEsqueci';
+    p.className = 'text-center mt-4';
+    p.innerHTML = '<button type="button" class="text-[12.5px] text-slate-500 hover:text-slate-800 underline" onclick="esqueciSenha()">Esqueci minha senha</button>';
+    document.getElementById('loginDica').parentNode.insertBefore(p, document.getElementById('loginDica'));
+  }
+  if (!document.getElementById('linkLocal')){
+    const p = document.createElement('p');
+    p.id = 'linkLocal';
+    p.className = 'text-center mt-2';
+    p.innerHTML = '<button type="button" class="text-[11.5px] text-slate-400 hover:text-slate-700 underline" onclick="usarAcessoLocal()">Problema para entrar? Usar o acesso local deste computador</button>';
+    document.getElementById('loginDica').parentNode.insertBefore(p, document.getElementById('loginDica'));
+  }
+}
+async function usarAcessoLocal(){
+  if (!confirm('Entrar com o acesso local deste computador?\n\nOs dados ficam só neste navegador, sem sincronizar com a nuvem.')) return;
+  modoNuvem = false;
+  statusNuvem('<i class="fa-solid fa-laptop"></i> dados apenas neste computador', 'aviso');
+  const lbl = document.getElementById('loginUser').closest('div').querySelector('.form-label');
+  if (lbl) lbl.textContent = 'Usuário';
+  const c = document.getElementById('loginUser');
+  c.type = 'text'; c.placeholder = ''; c.value = '';
+  document.getElementById('loginSenha').value = '';
+  const le = document.getElementById('linkEsqueci'); if (le) le.remove();
+  const ll = document.getElementById('linkLocal'); if (ll) ll.remove();
+  document.getElementById('loginErro').style.display = 'none';
+  await garantirUsuarioPadrao();
+  mostrarLogin();
+}
 (async () => {
+  const comNuvem = await iniciarNuvem();
+  if (comNuvem) {
+    ajustarTelaLoginNuvem();
+    statusNuvem('<i class="fa-solid fa-cloud"></i> modo nuvem', '');
+    fb.auth.onAuthStateChanged(user=>{
+      if (user) aposLoginNuvem(user);
+      else { usuarioAtual = null; mostrarLogin(); }
+    });
+    return;
+  }
+  // sem nuvem: segue com o acesso local deste computador
+  statusNuvem('<i class="fa-solid fa-laptop"></i> dados apenas neste computador', 'aviso');
   await garantirUsuarioPadrao();
   let sessao = null;
   try { sessao = JSON.parse(sessionStorage.getItem(SESSAO_KEY) || localStorage.getItem(SESSAO_KEY) || "null"); } catch(e){ console.warn("Sessao indisponivel", e); }
