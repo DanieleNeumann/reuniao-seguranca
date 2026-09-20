@@ -82,10 +82,52 @@
     .rel-folha { box-shadow:none; border:none; padding:0; max-width:none; margin:0 0 10px; }
     .rel-folha + .rel-folha { page-break-before:always; }
   }
+  /* ---- Login ---- */
+  .login-bg { position:fixed; inset:0; z-index:80; display:flex; align-items:center; justify-content:center; padding:20px;
+    background:linear-gradient(160deg,#0C56B0 0%,#0A4695 45%,#003A7D 100%); overflow:auto; }
+  .login-bg::after { content:''; position:absolute; right:-40px; bottom:-40px; width:360px; height:360px; opacity:.14;
+    background-image:radial-gradient(#fff 1.6px, transparent 1.7px); background-size:13px 13px; pointer-events:none; }
+  .login-card { position:relative; z-index:1; background:#fff; border-radius:16px; width:100%; max-width:390px;
+    padding:34px 32px; box-shadow:0 22px 60px rgba(0,0,0,.32); }
+  .login-badge { width:60px; height:60px; border-radius:16px; background:linear-gradient(160deg,#0C56B0,#003A7D);
+    display:flex; align-items:center; justify-content:center; margin:0 auto 16px; }
+  .login-erro { background:#fee2e2; color:#b91c1c; border-radius:8px; padding:9px 12px; font-size:13px; margin-bottom:14px; }
+  .aviso-senha { background:#fef3c7; color:#92400e; border-bottom:1px solid #fde68a; padding:9px 26px; font-size:13px;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 </style>
 </head>
 <body>
-<div class="flex">
+<!-- ================= TELA DE LOGIN ================= -->
+<div id="telaLogin" class="login-bg" style="display:none">
+  <form class="login-card" onsubmit="event.preventDefault();fazerLogin()">
+    <div class="login-badge"><i class="fa-solid fa-helmet-safety text-white text-[30px]"></i></div>
+    <div class="text-center mb-7">
+      <div class="font-extrabold text-[21px] text-slate-800 tracking-wide">SEGURANÇA</div>
+      <div class="text-[12.5px] text-slate-500 mt-1">Controle de Reuniões</div>
+    </div>
+    <div id="loginErro" class="login-erro" style="display:none"></div>
+    <div class="mb-4">
+      <label class="form-label">Usuário</label>
+      <input id="loginUser" class="form-input" autocomplete="username" autocapitalize="none" spellcheck="false">
+    </div>
+    <div class="mb-4">
+      <label class="form-label">Senha</label>
+      <div class="relative">
+        <input id="loginSenha" type="password" class="form-input pr-10" autocomplete="current-password">
+        <button type="button" tabindex="-1" onclick="verSenha('loginSenha',this)"
+                class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 px-1">
+          <i class="fa-solid fa-eye"></i></button>
+      </div>
+    </div>
+    <label class="flex items-center gap-2 text-[13px] text-slate-600 mb-5">
+      <input type="checkbox" id="loginLembrar" class="w-4 h-4 accent-[#0057B8]"> Manter conectado neste computador
+    </label>
+    <button type="submit" class="btn btn-primary w-full justify-center py-2.5"><i class="fa-solid fa-right-to-bracket"></i> Entrar</button>
+    <p id="loginDica" class="text-[11.5px] text-slate-400 text-center mt-5 leading-relaxed"></p>
+  </form>
+</div>
+
+<div class="flex" id="app" style="display:none">
   <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="px-5 py-7 border-b border-white/10">
@@ -109,10 +151,27 @@
     <div class="px-5 mt-4 text-[11px] text-blue-100/55 leading-relaxed">
       Dados salvos neste navegador.<br>Use <b>Backup</b> no Admin para levar a outro PC.
     </div>
+    <div class="px-4 mt-5 pt-4 border-t border-white/10">
+      <div class="flex items-center gap-2.5 px-1">
+        <div class="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center shrink-0">
+          <i class="fa-solid fa-user text-white text-[13px]"></i></div>
+        <div class="min-w-0 flex-1">
+          <div id="boxUsuarioNome" class="text-white text-[13px] font-semibold truncate"></div>
+          <div id="boxUsuarioLogin" class="text-blue-100/60 text-[11px] truncate"></div>
+        </div>
+      </div>
+      <button class="w-full mt-3 text-[12.5px] text-blue-100/80 hover:text-white hover:bg-white/10 rounded-lg py-2 transition"
+              onclick="sair()"><i class="fa-solid fa-right-from-bracket mr-1"></i> Sair</button>
+    </div>
   </aside>
 
   <!-- CONTEÚDO -->
   <main class="flex-1 min-w-0">
+      <div id="avisoSenha" class="aviso-senha no-print" style="display:none">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>Você ainda está usando a <b>senha padrão</b>. Troque-a em <b>Admin &rarr; Usuários e acessos</b>.</span>
+        <button class="btn btn-warn btn-sm ml-auto" onclick="document.querySelector('.nav-item[data-view=&quot;admin&quot;]').click()">Ir para Admin</button>
+      </div>
     <header class="bg-white border-b border-slate-200 px-7 py-4 flex items-center justify-between no-print">
       <div>
         <h1 id="pageTitle" class="text-xl font-bold text-slate-800">Dashboard</h1>
@@ -332,6 +391,31 @@
           </div>
           <div class="scroll-x"><table id="tabParticipantes"></table></div>
         </div>
+
+        <div class="card mt-5">
+          <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+            <h2 class="font-bold text-slate-800"><i class="fa-solid fa-key mr-1" style="color:#0057B8"></i> Usuários e acessos</h2>
+            <span id="qtdUsuarios" class="text-slate-400 text-[13px]"></span>
+          </div>
+          <p class="text-[12px] text-slate-500 mb-4">Todos os usuários têm o <b>mesmo acesso</b> a todas as abas e funções. Crie um acesso para cada pessoa que precisar usar o sistema.</p>
+          <div class="grid md:grid-cols-4 gap-3 items-end mb-4">
+            <div><label class="form-label">Usuário (login) *</label>
+              <input id="uLogin" class="form-input" placeholder="ex.: joao.silva" autocapitalize="none" spellcheck="false"></div>
+            <div><label class="form-label">Nome completo</label><input id="uNome" class="form-input"></div>
+            <div><label class="form-label">Senha *</label>
+              <div class="relative"><input id="uSenha" type="password" class="form-input pr-10">
+                <button type="button" tabindex="-1" onclick="verSenha('uSenha',this)"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 px-1"><i class="fa-solid fa-eye"></i></button></div></div>
+            <div class="flex gap-2">
+              <button class="btn btn-primary w-full justify-center" onclick="criarUsuario()"><i class="fa-solid fa-user-plus"></i> Criar acesso</button>
+            </div>
+          </div>
+          <div class="scroll-x"><table id="tabUsuarios"></table></div>
+          <p class="text-[11.5px] text-slate-400 mt-4 leading-relaxed">
+            As senhas são guardadas cifradas (SHA-256 com salt), nunca em texto puro. Os acessos ficam neste navegador e vão junto no
+            <b>backup .json</b> — ao importar o backup em outro computador, os mesmos logins passam a valer lá.
+          </p>
+        </div>
       </section>
 
     </div>
@@ -347,10 +431,20 @@ const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Ag
 const MESES_ABR = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
 const CFG_PADRAO = { contarJustificado:false, pularFeriados:true, encadearDatas:true };
-let db = { participantes:[], reunioes:[], escala:[], feriados:[], config:Object.assign({},CFG_PADRAO) };
+let db = { participantes:[], reunioes:[], escala:[], feriados:[], usuarios:[], config:Object.assign({},CFG_PADRAO) };
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
-function save(){ localStorage.setItem(DB_KEY, JSON.stringify(db)); }
+let avisouStorage = false;
+function save(){
+  try { localStorage.setItem(DB_KEY, JSON.stringify(db)); }
+  catch(e){
+    console.error('Falha ao gravar dados', e);
+    if (!avisouStorage) {
+      avisouStorage = true;
+      toast('Atenção: este navegador está bloqueando o armazenamento — as alterações não serão salvas.','erro');
+    }
+  }
+}
 function load(){
   try {
     const raw = localStorage.getItem(DB_KEY);
@@ -362,6 +456,7 @@ function load(){
       // a ordem do array é a ordem de apresentação; dados antigos vinham por data
       db.escala.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
       db.feriados = d.feriados || [];
+      db.usuarios = d.usuarios || [];
       db.config = Object.assign({}, CFG_PADRAO, d.config || {});
     }
   } catch(e){ console.error('Falha ao ler dados', e); }
@@ -600,6 +695,7 @@ function importarBackup(input){
       db.reunioes = d.reunioes || [];
       db.escala = d.escala || [];
       db.feriados = d.feriados || [];
+      db.usuarios = (d.usuarios && d.usuarios.length) ? d.usuarios : db.usuarios; // backup sem usuarios nao tira seu acesso
       db.config = Object.assign({}, CFG_PADRAO, d.config||{});
       save(); iniciarFiltros(); renderAll();
       document.getElementById('chkJust').checked = !!db.config.contarJustificado;
@@ -614,7 +710,8 @@ function importarBackup(input){
 function apagarTudo(){
   if (!confirm('Apagar TODOS os dados (participantes, reuniões e escala)?\n\nIsso não pode ser desfeito. Exporte um backup antes se precisar.')) return;
   if (!confirm('Confirma definitivamente?')) return;
-  db = { participantes:[], reunioes:[], escala:[], feriados:[], config:Object.assign({},CFG_PADRAO) };
+  const acessos = db.usuarios; // os acessos nao sao apagados aqui
+  db = { participantes:[], reunioes:[], escala:[], feriados:[], usuarios:acessos, config:Object.assign({},CFG_PADRAO) };
   save(); iniciarFiltros(); renderAll(); toast('Dados apagados.');
 }
 function exportarParticipantesCSV(){
@@ -1444,7 +1541,7 @@ function renderAll(){
   iniciarFiltros();
   document.getElementById('hdrCount').textContent = `${ativos().length} ativos · ${db.reunioes.length} reuniões`;
   document.getElementById('hdrDate').textContent = new Date().toLocaleDateString('pt-BR');
-  renderDashboard(); renderReunioes(); renderEscala(); renderParticipantes(); renderRelatorio();
+  renderDashboard(); renderReunioes(); renderEscala(); renderParticipantes(); renderRelatorio(); renderUsuarios();
 }
 ['relTipo','relReuniao','relPessoa','relDe','relAte'].forEach(id=>{
   document.getElementById(id).addEventListener('change', renderRelatorio);
@@ -1462,13 +1559,169 @@ document.getElementById('chkEncadear').onchange = e=>{ db.config.encadearDatas =
 document.getElementById('chkFeriados').onchange = e=>{ db.config.pularFeriados = e.target.checked; save(); renderEscala(); };
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') fecharModal(); });
 
+/* =============== USUÁRIOS / LOGIN =============== */
+const SESSAO_KEY = 'reuniaoSeguranca_sessao';
+const USUARIO_PADRAO = { usuario:'admin', senha:'admin123' };
+let usuarioAtual = null;
+
+function novoSalt(){
+  const a = new Uint8Array(12);
+  if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(a);
+  else for (let i=0;i<a.length;i++) a[i] = Math.floor(Math.random()*256);
+  return [...a].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function hashSenha(senha, salt){
+  const txt = salt + '|' + senha;
+  if (window.crypto && crypto.subtle && crypto.subtle.digest) {
+    try {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
+      return 'sha256:' + [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    } catch(e){ /* cai no alternativo abaixo */ }
+  }
+  let h1 = 5381, h2 = 52711;
+  for (let i=0;i<txt.length;i++){ const c = txt.charCodeAt(i); h1 = ((h1*33) ^ c) >>> 0; h2 = ((h2*31) + c) >>> 0; }
+  return 'alt:' + h1.toString(16) + h2.toString(16);
+}
+async function garantirUsuarioPadrao(){
+  if (!db.usuarios) db.usuarios = [];
+  if (db.usuarios.length) return;
+  const salt = novoSalt();
+  db.usuarios = [{ id:uid(), usuario:USUARIO_PADRAO.usuario, nome:'Administrador', salt,
+                   hash: await hashSenha(USUARIO_PADRAO.senha, salt), padrao:true, criadoEm:hojeISO() }];
+  save();
+}
+function verSenha(id, btn){
+  const c = document.getElementById(id);
+  c.type = c.type === 'password' ? 'text' : 'password';
+  btn.innerHTML = c.type === 'password' ? '<i class="fa-solid fa-eye"></i>' : '<i class="fa-solid fa-eye-slash"></i>';
+}
+function mostrarLogin(){
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('telaLogin').style.display = 'flex';
+  const dica = document.getElementById('loginDica');
+  const padrao = (db.usuarios||[]).find(u=>u.padrao);
+  dica.innerHTML = (db.usuarios||[]).length === 1 && padrao
+    ? 'Primeiro acesso — usuário <b>' + esc(USUARIO_PADRAO.usuario) + '</b> e senha <b>' + esc(USUARIO_PADRAO.senha) + '</b>.<br>Troque a senha depois de entrar, na aba Admin.'
+    : '';
+  setTimeout(()=>document.getElementById('loginUser').focus(), 60);
+}
+async function fazerLogin(){
+  const u = document.getElementById('loginUser').value.trim();
+  const s = document.getElementById('loginSenha').value;
+  const erro = document.getElementById('loginErro');
+  const user = (db.usuarios||[]).find(x=>norm(x.usuario) === norm(u));
+  if (!u || !s || !user || (await hashSenha(s, user.salt)) !== user.hash) {
+    erro.textContent = 'Usuário ou senha inválidos.';
+    erro.style.display = '';
+    document.getElementById('loginSenha').value = '';
+    document.getElementById('loginSenha').focus();
+    return;
+  }
+  erro.style.display = 'none';
+  try {
+    const alvo = document.getElementById('loginLembrar').checked ? localStorage : sessionStorage;
+    alvo.setItem(SESSAO_KEY, JSON.stringify({ id:user.id, em:Date.now() }));
+  } catch(e){ console.warn('Nao foi possivel guardar a sessao', e); }
+  usuarioAtual = user;
+  abrirApp();
+}
+function abrirApp(){
+  document.getElementById('telaLogin').style.display = 'none';
+  document.getElementById('app').style.display = '';
+  document.getElementById('boxUsuarioNome').textContent = usuarioAtual.nome || usuarioAtual.usuario;
+  document.getElementById('boxUsuarioLogin').textContent = '@' + usuarioAtual.usuario;
+  document.getElementById('loginSenha').value = '';
+  renderAll();
+  avisoSenhaPadrao();
+}
+function sair(){
+  if (!confirm('Sair do aplicativo?')) return;
+  try { localStorage.removeItem(SESSAO_KEY); sessionStorage.removeItem(SESSAO_KEY); } catch(e){}
+  usuarioAtual = null;
+  location.reload();
+}
+function avisoSenhaPadrao(){
+  const el = document.getElementById('avisoSenha');
+  if (!el) return;
+  const eu = (db.usuarios||[]).find(u=>u.id === (usuarioAtual||{}).id);
+  el.style.display = eu && eu.padrao ? 'flex' : 'none';
+}
+
+/* ---- gestão de acessos ---- */
+async function criarUsuario(){
+  const login = document.getElementById('uLogin').value.trim();
+  const nome  = document.getElementById('uNome').value.trim();
+  const senha = document.getElementById('uSenha').value;
+  if (!login) { toast('Informe o usuário (login).','erro'); return; }
+  if (/\s/.test(login)) { toast('O login não pode ter espaços.','erro'); return; }
+  if (senha.length < 4) { toast('A senha precisa de pelo menos 4 caracteres.','erro'); return; }
+  if ((db.usuarios||[]).some(u=>norm(u.usuario)===norm(login))) { toast('Já existe um usuário com esse login.','erro'); return; }
+  const salt = novoSalt();
+  db.usuarios.push({ id:uid(), usuario:login, nome, salt, hash:await hashSenha(senha,salt), criadoEm:hojeISO() });
+  save();
+  document.getElementById('uLogin').value = '';
+  document.getElementById('uNome').value = '';
+  document.getElementById('uSenha').value = '';
+  renderUsuarios();
+  toast('Acesso de "' + login + '" criado.');
+}
+async function trocarSenha(id){
+  const u = (db.usuarios||[]).find(x=>x.id===id); if(!u) return;
+  const nova = prompt('Nova senha para "' + u.usuario + '" (mínimo 4 caracteres):');
+  if (nova === null) return;
+  if (nova.length < 4) { toast('Senha muito curta.','erro'); return; }
+  const conf = prompt('Digite a nova senha novamente para confirmar:');
+  if (conf === null) return;
+  if (conf !== nova) { toast('As senhas não conferem.','erro'); return; }
+  u.salt = novoSalt();
+  u.hash = await hashSenha(nova, u.salt);
+  delete u.padrao;
+  save(); renderUsuarios(); avisoSenhaPadrao();
+  toast('Senha alterada.');
+}
+function excluirUsuario(id){
+  const u = (db.usuarios||[]).find(x=>x.id===id); if(!u) return;
+  if (db.usuarios.length === 1) { toast('Não é possível excluir o único acesso do sistema.','erro'); return; }
+  if (usuarioAtual && usuarioAtual.id === id) { toast('Você não pode excluir o acesso com que está conectado.','erro'); return; }
+  if (!confirm('Excluir o acesso de "' + u.usuario + '"?\n\nEssa pessoa não conseguirá mais entrar no sistema.')) return;
+  db.usuarios = db.usuarios.filter(x=>x.id!==id);
+  save(); renderUsuarios(); toast('Acesso excluído.');
+}
+function renderUsuarios(){
+  const lista = db.usuarios || [];
+  const q = document.getElementById('qtdUsuarios');
+  if (q) q.textContent = lista.length + ' acesso(s)';
+  let h = '<thead><tr><th>Usuário</th><th>Nome</th><th>Criado em</th><th>Situação</th><th style="width:210px"></th></tr></thead><tbody>';
+  if (!lista.length) h += '<tr><td colspan="5" class="text-center text-slate-400 py-6">Nenhum acesso cadastrado.</td></tr>';
+  lista.forEach(u=>{
+    const eu = usuarioAtual && usuarioAtual.id === u.id;
+    h += '<tr>'
+      + '<td class="font-semibold text-slate-700">@' + esc(u.usuario) + (eu?' <span class="badge b-blue ml-1">você</span>':'') + '</td>'
+      + '<td>' + (esc(u.nome)||'—') + '</td>'
+      + '<td class="text-slate-500">' + (u.criadoEm?fmtData(u.criadoEm):'—') + '</td>'
+      + '<td>' + (u.padrao?'<span class="badge b-amber">senha padrão</span>':'<span class="badge b-green">senha definida</span>') + '</td>'
+      + '<td class="text-right whitespace-nowrap">'
+      + '<button class="btn btn-secondary btn-sm" onclick="trocarSenha(\'' + u.id + '\')"><i class="fa-solid fa-key"></i> Trocar senha</button> '
+      + '<button class="btn btn-danger btn-sm" onclick="excluirUsuario(\'' + u.id + '\')"><i class="fa-solid fa-trash"></i></button>'
+      + '</td></tr>';
+  });
+  const t = document.getElementById('tabUsuarios');
+  if (t) t.innerHTML = h + '</tbody>';
+}
+
 load();
 document.getElementById('chkJust').checked = !!db.config.contarJustificado;
 document.getElementById('chkEncadear').checked = db.config.encadearDatas !== false;
 document.getElementById('chkFeriados').checked = db.config.pularFeriados !== false;
 document.getElementById('wrapAno').style.display = 'none';
 document.getElementById('escIni').value = hojeISO();
-renderAll();
+(async () => {
+  await garantirUsuarioPadrao();
+  let sessao = null;
+  try { sessao = JSON.parse(sessionStorage.getItem(SESSAO_KEY) || localStorage.getItem(SESSAO_KEY) || "null"); } catch(e){ console.warn("Sessao indisponivel", e); }
+  const u = sessao ? (db.usuarios||[]).find(x=>x.id === sessao.id) : null;
+  if (u) { usuarioAtual = u; abrirApp(); } else { mostrarLogin(); }
+})();
 </script>
 </body>
 </html>
