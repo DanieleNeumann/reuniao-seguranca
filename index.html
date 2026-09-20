@@ -99,7 +99,7 @@
 <body>
 <!-- ================= TELA DE LOGIN ================= -->
 <div id="telaLogin" class="login-bg" style="display:none">
-  <form class="login-card" onsubmit="event.preventDefault();fazerLogin()">
+  <form id="painelLogin" class="login-card" onsubmit="event.preventDefault();fazerLogin()">
     <div class="login-badge"><i class="fa-solid fa-helmet-safety text-white text-[30px]"></i></div>
     <div class="text-center mb-7">
       <div class="font-extrabold text-[21px] text-slate-800 tracking-wide">SEGURANÇA</div>
@@ -124,6 +124,38 @@
     </label>
     <button type="submit" class="btn btn-primary w-full justify-center py-2.5"><i class="fa-solid fa-right-to-bracket"></i> Entrar</button>
     <p id="loginDica" class="text-[11.5px] text-slate-400 text-center mt-5 leading-relaxed"></p>
+  </form>
+  <form id="painelNovaSenha" class="login-card" style="display:none" onsubmit="event.preventDefault();salvarPrimeiraSenha()">
+    <div class="login-badge" style="background:linear-gradient(160deg,#d97706,#92400e)"><i class="fa-solid fa-key text-white text-[26px]"></i></div>
+    <div class="text-center mb-6">
+      <div class="font-extrabold text-[18px] text-slate-800">Defina sua senha</div>
+      <div class="text-[12.5px] text-slate-500 mt-2 leading-relaxed">
+        Olá, <b id="nsNome" class="text-slate-700"></b>.<br>
+        Este é o seu primeiro acesso. Por segurança, escolha uma senha pessoal para continuar.
+      </div>
+    </div>
+    <div id="nsErro" class="login-erro" style="display:none"></div>
+    <div class="mb-4">
+      <label class="form-label">Nova senha</label>
+      <div class="relative">
+        <input id="nsSenha1" type="password" class="form-input pr-10" autocomplete="new-password">
+        <button type="button" tabindex="-1" onclick="verSenha('nsSenha1',this)"
+                class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 px-1"><i class="fa-solid fa-eye"></i></button>
+      </div>
+    </div>
+    <div class="mb-5">
+      <label class="form-label">Repita a nova senha</label>
+      <div class="relative">
+        <input id="nsSenha2" type="password" class="form-input pr-10" autocomplete="new-password">
+        <button type="button" tabindex="-1" onclick="verSenha('nsSenha2',this)"
+                class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 px-1"><i class="fa-solid fa-eye"></i></button>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary w-full justify-center py-2.5"><i class="fa-solid fa-check"></i> Salvar e entrar</button>
+    <button type="button" class="btn btn-secondary w-full justify-center mt-2" onclick="cancelarPrimeiraSenha()">Cancelar</button>
+    <p class="text-[11.5px] text-slate-400 text-center mt-4 leading-relaxed">
+      Mínimo de 4 caracteres. A senha provisória deixa de valer assim que você salvar.
+    </p>
   </form>
 </div>
 
@@ -397,12 +429,12 @@
             <h2 class="font-bold text-slate-800"><i class="fa-solid fa-key mr-1" style="color:#0057B8"></i> Usuários e acessos</h2>
             <span id="qtdUsuarios" class="text-slate-400 text-[13px]"></span>
           </div>
-          <p class="text-[12px] text-slate-500 mb-4">Todos os usuários têm o <b>mesmo acesso</b> a todas as abas e funções. Crie um acesso para cada pessoa que precisar usar o sistema.</p>
+          <p class="text-[12px] text-slate-500 mb-4">Todos os usuários têm o <b>mesmo acesso</b> a todas as abas e funções. Crie um acesso para cada pessoa que precisar usar o sistema — a senha que você digitar aqui é <b>provisória</b>: no primeiro acesso, a própria pessoa define a senha dela.</p>
           <div class="grid md:grid-cols-4 gap-3 items-end mb-4">
             <div><label class="form-label">Usuário (login) *</label>
               <input id="uLogin" class="form-input" placeholder="ex.: joao.silva" autocapitalize="none" spellcheck="false"></div>
             <div><label class="form-label">Nome completo</label><input id="uNome" class="form-input"></div>
-            <div><label class="form-label">Senha *</label>
+            <div><label class="form-label">Senha provisória *</label>
               <div class="relative"><input id="uSenha" type="password" class="form-input pr-10">
                 <button type="button" tabindex="-1" onclick="verSenha('uSenha',this)"
                   class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 px-1"><i class="fa-solid fa-eye"></i></button></div></div>
@@ -1562,6 +1594,7 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape') fecharModal(); })
 /* =============== USUÁRIOS / LOGIN =============== */
 const SESSAO_KEY = 'reuniaoSeguranca_sessao';
 const USUARIO_PADRAO = { usuario:'admin', senha:'admin123' };
+const NOME_ADMIN = 'Daniele Neumann';
 let usuarioAtual = null;
 
 function novoSalt(){
@@ -1584,9 +1617,14 @@ async function hashSenha(senha, salt){
 }
 async function garantirUsuarioPadrao(){
   if (!db.usuarios) db.usuarios = [];
-  if (db.usuarios.length) return;
+  if (db.usuarios.length) {
+    // ajuste do nome do primeiro admin em instalacoes que ja existiam
+    const adm = db.usuarios.find(u=>norm(u.usuario)===norm(USUARIO_PADRAO.usuario));
+    if (adm && (!adm.nome || adm.nome === 'Administrador')) { adm.nome = NOME_ADMIN; save(); }
+    return;
+  }
   const salt = novoSalt();
-  db.usuarios = [{ id:uid(), usuario:USUARIO_PADRAO.usuario, nome:'Administrador', salt,
+  db.usuarios = [{ id:uid(), usuario:USUARIO_PADRAO.usuario, nome:NOME_ADMIN, salt,
                    hash: await hashSenha(USUARIO_PADRAO.senha, salt), padrao:true, criadoEm:hojeISO() }];
   save();
 }
@@ -1618,12 +1656,56 @@ async function fazerLogin(){
     return;
   }
   erro.style.display = 'none';
+  if (user.senhaProvisoria) { pedirPrimeiraSenha(user); return; }
+  entrarComo(user);
+}
+function entrarComo(user){
   try {
     const alvo = document.getElementById('loginLembrar').checked ? localStorage : sessionStorage;
     alvo.setItem(SESSAO_KEY, JSON.stringify({ id:user.id, em:Date.now() }));
   } catch(e){ console.warn('Nao foi possivel guardar a sessao', e); }
   usuarioAtual = user;
   abrirApp();
+}
+/* ---- troca obrigatória no primeiro acesso ---- */
+let aguardandoPrimeiraSenha = null;
+function pedirPrimeiraSenha(user){
+  aguardandoPrimeiraSenha = user;
+  document.getElementById('painelLogin').style.display = 'none';
+  document.getElementById('painelNovaSenha').style.display = '';
+  document.getElementById('nsNome').textContent = user.nome || user.usuario;
+  document.getElementById('nsErro').style.display = 'none';
+  document.getElementById('nsSenha1').value = '';
+  document.getElementById('nsSenha2').value = '';
+  setTimeout(()=>document.getElementById('nsSenha1').focus(), 60);
+}
+function cancelarPrimeiraSenha(){
+  aguardandoPrimeiraSenha = null;
+  document.getElementById('painelNovaSenha').style.display = 'none';
+  document.getElementById('painelLogin').style.display = '';
+  document.getElementById('loginSenha').value = '';
+  setTimeout(()=>document.getElementById('loginUser').focus(), 60);
+}
+async function salvarPrimeiraSenha(){
+  const user = aguardandoPrimeiraSenha;
+  if (!user) { cancelarPrimeiraSenha(); return; }
+  const s1 = document.getElementById('nsSenha1').value;
+  const s2 = document.getElementById('nsSenha2').value;
+  const erro = document.getElementById('nsErro');
+  const falhar = msg => { erro.textContent = msg; erro.style.display = ''; };
+  if (s1.length < 4) return falhar('A senha precisa de pelo menos 4 caracteres.');
+  if (s1 !== s2) return falhar('As duas senhas não são iguais.');
+  if ((await hashSenha(s1, user.salt)) === user.hash) return falhar('Escolha uma senha diferente da provisória.');
+  user.salt = novoSalt();
+  user.hash = await hashSenha(s1, user.salt);
+  delete user.senhaProvisoria;
+  delete user.padrao;
+  save();
+  aguardandoPrimeiraSenha = null;
+  document.getElementById('painelNovaSenha').style.display = 'none';
+  document.getElementById('painelLogin').style.display = '';
+  entrarComo(user);
+  toast('Senha definida. Bem-vindo(a)!');
 }
 function abrirApp(){
   document.getElementById('telaLogin').style.display = 'none';
@@ -1657,13 +1739,14 @@ async function criarUsuario(){
   if (senha.length < 4) { toast('A senha precisa de pelo menos 4 caracteres.','erro'); return; }
   if ((db.usuarios||[]).some(u=>norm(u.usuario)===norm(login))) { toast('Já existe um usuário com esse login.','erro'); return; }
   const salt = novoSalt();
-  db.usuarios.push({ id:uid(), usuario:login, nome, salt, hash:await hashSenha(senha,salt), criadoEm:hojeISO() });
+  db.usuarios.push({ id:uid(), usuario:login, nome, salt, hash:await hashSenha(senha,salt),
+                     senhaProvisoria:true, criadoEm:hojeISO() });
   save();
   document.getElementById('uLogin').value = '';
   document.getElementById('uNome').value = '';
   document.getElementById('uSenha').value = '';
   renderUsuarios();
-  toast('Acesso de "' + login + '" criado.');
+  toast('Acesso de "' + login + '" criado — a senha é provisória.');
 }
 async function trocarSenha(id){
   const u = (db.usuarios||[]).find(x=>x.id===id); if(!u) return;
@@ -1676,6 +1759,8 @@ async function trocarSenha(id){
   u.salt = novoSalt();
   u.hash = await hashSenha(nova, u.salt);
   delete u.padrao;
+  // senha trocada por outra pessoa vira provisoria: o dono define a dele no proximo acesso
+  if (usuarioAtual && usuarioAtual.id === u.id) delete u.senhaProvisoria; else u.senhaProvisoria = true;
   save(); renderUsuarios(); avisoSenhaPadrao();
   toast('Senha alterada.');
 }
@@ -1699,7 +1784,9 @@ function renderUsuarios(){
       + '<td class="font-semibold text-slate-700">@' + esc(u.usuario) + (eu?' <span class="badge b-blue ml-1">você</span>':'') + '</td>'
       + '<td>' + (esc(u.nome)||'—') + '</td>'
       + '<td class="text-slate-500">' + (u.criadoEm?fmtData(u.criadoEm):'—') + '</td>'
-      + '<td>' + (u.padrao?'<span class="badge b-amber">senha padrão</span>':'<span class="badge b-green">senha definida</span>') + '</td>'
+      + '<td>' + (u.padrao ? '<span class="badge b-amber">senha padrão</span>'
+                    : u.senhaProvisoria ? '<span class="badge b-amber">senha provisória</span>'
+                    : '<span class="badge b-green">senha definida</span>') + '</td>'
       + '<td class="text-right whitespace-nowrap">'
       + '<button class="btn btn-secondary btn-sm" onclick="trocarSenha(\'' + u.id + '\')"><i class="fa-solid fa-key"></i> Trocar senha</button> '
       + '<button class="btn btn-danger btn-sm" onclick="excluirUsuario(\'' + u.id + '\')"><i class="fa-solid fa-trash"></i></button>'
