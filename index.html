@@ -715,6 +715,7 @@ function exportarBackup(){
   baixar(`backup-reuniao-seguranca-${hojeISO()}.json`, JSON.stringify(db,null,2), 'application/json');
   toast('Backup exportado.');
 }
+let backupPendente = null;
 function importarBackup(input){
   const f = input.files[0]; if(!f) return;
   const rd = new FileReader();
@@ -722,22 +723,168 @@ function importarBackup(input){
     try {
       const d = JSON.parse(e.target.result);
       if (!d || !Array.isArray(d.participantes)) throw new Error('Arquivo inválido.');
-      if (!confirm('Restaurar backup?\n\nTodos os dados atuais deste navegador serão substituídos.')) { input.value=''; return; }
-      db.participantes = d.participantes || [];
-      db.reunioes = d.reunioes || [];
-      db.escala = d.escala || [];
-      db.feriados = d.feriados || [];
-      db.usuarios = (d.usuarios && d.usuarios.length) ? d.usuarios : db.usuarios; // backup sem usuarios nao tira seu acesso
-      db.config = Object.assign({}, CFG_PADRAO, d.config||{});
-      save(); iniciarFiltros(); renderAll();
-      document.getElementById('chkJust').checked = !!db.config.contarJustificado;
-      document.getElementById('chkEncadear').checked = db.config.encadearDatas !== false;
-      document.getElementById('chkFeriados').checked = db.config.pularFeriados !== false;
-      toast('Backup restaurado.');
+      backupPendente = d;
+      modalBackup(d, f.name);
     } catch(err){ toast('Erro: '+err.message, 'erro'); }
     input.value='';
   };
   rd.readAsText(f);
+}
+function modalBackup(d, nomeArquivo){
+  const linha = (rot, arq, aqui) => `<tr><td>${rot}</td>
+      <td class="text-center font-bold text-slate-700">${arq}</td>
+      <td class="text-center text-slate-500">${aqui}</td></tr>`;
+  document.getElementById('modalHost').innerHTML = `
+  <div class="modal-bg" onclick="if(event.target===this) fecharModal()">
+    <div class="modal" style="max-width:600px">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+        <h3 class="font-bold text-slate-800 text-lg">Importar backup</h3>
+        <button class="text-slate-400 hover:text-slate-700 text-xl" onclick="fecharModal()">&times;</button>
+      </div>
+      <div class="p-6">
+        <p class="text-[13px] text-slate-500 mb-4">Arquivo: <b class="text-slate-700">${esc(nomeArquivo)}</b></p>
+        <table class="mb-5"><thead><tr><th></th><th class="text-center">No arquivo</th><th class="text-center">Neste computador</th></tr></thead><tbody>
+          ${linha('Participantes', (d.participantes||[]).length, db.participantes.length)}
+          ${linha('Reuniões', (d.reunioes||[]).length, db.reunioes.length)}
+          ${linha('Escala', (d.escala||[]).length, db.escala.length)}
+          ${linha('Feriados próprios', (d.feriados||[]).length, (db.feriados||[]).length)}
+          ${linha('Acessos', (d.usuarios||[]).length, (db.usuarios||[]).length)}
+        </tbody></table>
+        <div class="rounded-lg bg-blue-50 text-blue-900 text-[12.5px] px-4 py-3 mb-2">
+          <b><i class="fa-solid fa-code-branch mr-1"></i> Mesclar (recomendado)</b><br>
+          Junta os dois: o que existe aqui é mantido e o que vier do arquivo é acrescentado.
+          Nada é apagado. Use para unir o trabalho feito em computadores diferentes.
+        </div>
+        <div class="rounded-lg bg-amber-50 text-amber-900 text-[12.5px] px-4 py-3">
+          <b><i class="fa-solid fa-triangle-exclamation mr-1"></i> Substituir tudo</b><br>
+          Apaga o que está neste computador e deixa apenas o conteúdo do arquivo.
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2 flex-wrap">
+        <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+        <button class="btn btn-danger" onclick="substituirBackup()"><i class="fa-solid fa-rotate"></i> Substituir tudo</button>
+        <button class="btn btn-primary" onclick="mesclarBackup()"><i class="fa-solid fa-code-branch"></i> Mesclar</button>
+      </div>
+    </div></div>`;
+}
+function aplicarConfigNaTela(){
+  document.getElementById('chkJust').checked = !!db.config.contarJustificado;
+  document.getElementById('chkEncadear').checked = db.config.encadearDatas !== false;
+  document.getElementById('chkFeriados').checked = db.config.pularFeriados !== false;
+}
+function substituirBackup(){
+  const d = backupPendente; if(!d) return;
+  if (!confirm('Substituir TUDO?\n\nOs dados atuais deste computador serão apagados e trocados pelo conteúdo do arquivo.')) return;
+  db.participantes = d.participantes || [];
+  db.reunioes = d.reunioes || [];
+  db.escala = d.escala || [];
+  db.escala.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  db.feriados = d.feriados || [];
+  db.usuarios = (d.usuarios && d.usuarios.length) ? d.usuarios : db.usuarios;
+  db.config = Object.assign({}, CFG_PADRAO, d.config||{});
+  backupPendente = null;
+  save(); iniciarFiltros(); renderAll(); aplicarConfigNaTela(); fecharModal();
+  toast('Backup restaurado.');
+}
+function mesclarBackup(){
+  const d = backupPendente; if(!d) return;
+  const r = { partNovos:0, partAtualizados:0, reunNovas:0, presAdicionadas:0, divergencias:[], escNovas:0, ferNovos:0, usuNovos:0 };
+
+  // 1) participantes — casa por matrícula, senão por nome; guarda o "de-para" dos ids
+  const mapa = {};
+  (d.participantes||[]).forEach(p=>{
+    if (!p || !p.nome) return;
+    let local = db.participantes.find(x =>
+      (p.matricula && x.matricula && norm(x.matricula) === norm(p.matricula)) || norm(x.nome) === norm(p.nome));
+    if (!local) {
+      local = { id:uid(), nome:p.nome, matricula:p.matricula||'', setor:p.setor||'',
+                turno:p.turno||'', funcao:p.funcao||'', ativo:p.ativo!==false };
+      db.participantes.push(local); r.partNovos++;
+    } else {
+      let mudou = false;
+      ['matricula','setor','turno','funcao'].forEach(c=>{ if(!local[c] && p[c]){ local[c]=p[c]; mudou=true; } });
+      if (mudou) r.partAtualizados++;
+    }
+    mapa[p.id] = local.id;
+  });
+  const idLocal = id => mapa[id] || (db.participantes.some(x=>x.id===id) ? id : null);
+
+  // 2) reuniões — mesma data = mesma reunião; presenças de quem falta são acrescentadas
+  (d.reunioes||[]).forEach(rem=>{
+    if (!rem || !rem.data) return;
+    const pres = {};
+    Object.entries(rem.presencas||{}).forEach(([k,v])=>{ const nk = idLocal(k); if (nk) pres[nk] = v; });
+    const local = db.reunioes.find(x=>x.data === rem.data);
+    if (!local) {
+      db.reunioes.push({ id:uid(), data:rem.data, tema:rem.tema||'', local:rem.local||'', obs:rem.obs||'',
+                         apresentador: rem.apresentador ? (idLocal(rem.apresentador)||'') : '', presencas:pres });
+      r.reunNovas++;
+    } else {
+      if (!local.tema && rem.tema) local.tema = rem.tema;
+      if (!local.local && rem.local) local.local = rem.local;
+      if (!local.obs && rem.obs) local.obs = rem.obs;
+      if (!local.apresentador && rem.apresentador) local.apresentador = idLocal(rem.apresentador) || '';
+      local.presencas = local.presencas || {};
+      Object.entries(pres).forEach(([k,v])=>{
+        if (local.presencas[k] === undefined) { local.presencas[k] = v; r.presAdicionadas++; }
+        else if (local.presencas[k] !== v) r.divergencias.push({ data:local.data, nome:nomePart(k) });
+      });
+    }
+  });
+
+  // 3) escala — mantém o que já existe na data; acrescenta as datas que faltam
+  (d.escala||[]).forEach(e=>{
+    if (!e || !e.data || db.escala.some(x=>x.data === e.data)) return;
+    db.escala.push({ id:uid(), data:e.data, participante: idLocal(e.participante) || '',
+                     tema:e.tema||'', status:e.status||'agendado', obs:e.obs||'' });
+    r.escNovas++;
+  });
+  db.escala.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+
+  // 4) feriados e acessos — só o que ainda não existe
+  if (!db.feriados) db.feriados = [];
+  (d.feriados||[]).forEach(f=>{ if (f && f.data && !db.feriados.some(x=>x.data===f.data)) { db.feriados.push(f); r.ferNovos++; } });
+  (d.usuarios||[]).forEach(u=>{
+    if (u && u.usuario && !(db.usuarios||[]).some(x=>norm(x.usuario)===norm(u.usuario))) { db.usuarios.push(u); r.usuNovos++; }
+  });
+
+  backupPendente = null;
+  save(); iniciarFiltros(); renderAll();
+  modalResultadoMesclagem(r);
+}
+function modalResultadoMesclagem(r){
+  const item = (n, rot, cor) => `<div class="flex items-baseline gap-2 py-1">
+      <b class="text-[19px] ${cor||'text-slate-700'}" style="min-width:38px">${n}</b>
+      <span class="text-[13px] text-slate-600">${rot}</span></div>`;
+  const div = r.divergencias.slice(0,12);
+  document.getElementById('modalHost').innerHTML = `
+  <div class="modal-bg" onclick="if(event.target===this) fecharModal()">
+    <div class="modal" style="max-width:560px">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+        <h3 class="font-bold text-slate-800 text-lg"><i class="fa-solid fa-circle-check text-green-600 mr-1"></i> Mesclagem concluída</h3>
+        <button class="text-slate-400 hover:text-slate-700 text-xl" onclick="fecharModal()">&times;</button>
+      </div>
+      <div class="p-6">
+        <p class="text-[13px] text-slate-500 mb-4">Nada foi apagado. Isto é o que veio do arquivo:</p>
+        ${item(r.partNovos,'participante(s) novo(s)')}
+        ${item(r.partAtualizados,'participante(s) com dados completados')}
+        ${item(r.reunNovas,'reunião(ões) nova(s)')}
+        ${item(r.presAdicionadas,'presença(s) acrescentada(s) em reuniões que já existiam')}
+        ${item(r.escNovas,'semana(s) nova(s) na escala')}
+        ${item(r.ferNovos,'feriado(s) próprio(s)')}
+        ${item(r.usuNovos,'acesso(s) de usuário')}
+        ${r.divergencias.length ? `
+          <div class="rounded-lg bg-amber-50 text-amber-900 text-[12.5px] px-4 py-3 mt-4">
+            <b><i class="fa-solid fa-triangle-exclamation mr-1"></i> ${r.divergencias.length} divergência(s)</b> —
+            a mesma pessoa está com presença diferente nos dois lados. <b>Mantive o que estava neste computador.</b>
+            Confira na aba Reuniões se precisar corrigir:<br>
+            <span class="text-[12px]">${div.map(x=>`${esc(x.nome)} (${fmtData(x.data)})`).join(' · ')}${r.divergencias.length>12?' …':''}</span>
+          </div>` : ''}
+      </div>
+      <div class="px-6 py-4 border-t border-slate-200 flex justify-end">
+        <button class="btn btn-primary" onclick="fecharModal()">Entendi</button>
+      </div>
+    </div></div>`;
 }
 function apagarTudo(){
   if (!confirm('Apagar TODOS os dados (participantes, reuniões e escala)?\n\nIsso não pode ser desfeito. Exporte um backup antes se precisar.')) return;
